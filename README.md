@@ -57,14 +57,14 @@ Activate `.venv` again whenever you open a new terminal. If your system uses a d
 From the repository root, create and start the shared database service:
 
 ```sh
-docker compose -f infra/compose.yaml up -d postgres
-docker compose -f infra/compose.yaml ps
+docker compose --env-file .env -f infra/compose.yaml up -d postgres
+docker compose --env-file .env -f infra/compose.yaml ps
 ```
 
 The service may take a short time to become healthy. Verify it from the container:
 
 ```sh
-docker compose -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT current_database(), version();"
+docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT current_database(), version();"
 ```
 
 Then, with `.venv` active, verify Python can connect:
@@ -102,8 +102,8 @@ After the one-time setup, reuse the same environment. Do not make a new virtual 
 3. Start PostgreSQL if it is stopped. After the first-time `up` command above, use:
 
    ```sh
-   docker compose -f infra/compose.yaml start postgres
-   docker compose -f infra/compose.yaml ps
+   docker compose --env-file .env -f infra/compose.yaml start postgres
+   docker compose --env-file .env -f infra/compose.yaml ps
    ```
 
    If the service has not yet been created on this computer, use the first-time `up -d postgres` command instead.
@@ -115,7 +115,7 @@ After the one-time setup, reuse the same environment. Do not make a new virtual 
 When finished, stop the service if you do not need it:
 
 ```sh
-docker compose -f infra/compose.yaml stop postgres
+docker compose --env-file .env -f infra/compose.yaml stop postgres
 ```
 
 Stopping PostgreSQL preserves the database for next time. Do not remove the shared Docker volume as part of routine work; reset only the schema specified by that lab's instructions.

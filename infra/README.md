@@ -10,23 +10,23 @@ The database and volume are shared by the course. Lab setup and reset files must
 
 Start PostgreSQL:
 
-    docker compose -f infra/compose.yaml up -d postgres
+    docker compose --env-file .env -f infra/compose.yaml up -d postgres
 
 Check service state and health:
 
-    docker compose -f infra/compose.yaml ps
+    docker compose --env-file .env -f infra/compose.yaml ps
 
 Read PostgreSQL logs:
 
-    docker compose -f infra/compose.yaml logs -f postgres
+    docker compose --env-file .env -f infra/compose.yaml logs -f postgres
 
 Open psql inside the container, using the local values in .env.example:
 
-    docker compose -f infra/compose.yaml exec postgres psql -U csai302 -d csai302
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302
 
 Stop the container while preserving its data:
 
-    docker compose -f infra/compose.yaml stop postgres
+    docker compose --env-file .env -f infra/compose.yaml stop postgres
 
 Starting the service again uses the same container configuration and named volume. Do not use volume-removal commands for a normal lab reset: they erase the entire course database.
 
