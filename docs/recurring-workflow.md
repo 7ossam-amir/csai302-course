@@ -8,10 +8,10 @@ Before a lab:
 2. Activate the existing .venv.
 3. Start PostgreSQL if it is stopped:
 
-       docker compose -f infra/compose.yaml start postgres
+       docker compose --env-file .env -f infra/compose.yaml start postgres
 
    For the first run only, use the one-time setup guide's up command instead.
-4. Check service health with docker compose -f infra/compose.yaml ps.
+4. Check service health with docker compose --env-file .env -f infra/compose.yaml ps.
 5. Connect to the csai302 database with DBeaver or psql.
 6. Run that lab's SQL setup only if its schema is not already present.
 

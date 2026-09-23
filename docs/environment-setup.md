@@ -47,15 +47,15 @@ The .venv directory is shared by the course and is not committed to Git. Activat
 
 Start the service from the repository root:
 
-    docker compose -f infra/compose.yaml up -d postgres
+    docker compose --env-file .env -f infra/compose.yaml up -d postgres
 
 Wait until the service reports healthy:
 
-    docker compose -f infra/compose.yaml ps
+    docker compose --env-file .env -f infra/compose.yaml ps
 
 Check a SQL connection from inside the container:
 
-    docker compose -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT current_database(), version();"
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT current_database(), version();"
 
 If you changed the local database name or username in .env, use those values in the psql command.
 

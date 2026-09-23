@@ -59,11 +59,11 @@ From the course repository root, run db/schema.sql and then db/seed.sql against 
 
 PowerShell:
 
-    Get-Content labs/lab01/db/schema.sql | docker compose -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    Get-Content labs/lab01/db/schema.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
 
 macOS or Linux:
 
-    docker compose -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302 < labs/lab01/db/schema.sql
+    docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302 < labs/lab01/db/schema.sql
 
 Repeat with seed.sql. Substitute values from .env if you changed the local username or database name.
 
