@@ -137,3 +137,50 @@ Load the task files (macOS or Linux):
 
     \df lab01.*
     SELECT tgname FROM pg_trigger WHERE tgrelid = 'lab01.order_items'::regclass AND NOT tgisinternal;
+
+## Run commands (Windows Command Prompt)
+
+Run these from the repository root.
+
+Start PostgreSQL and check it:
+
+    docker compose --env-file .env -f infra/compose.yaml up -d postgres
+    docker compose --env-file .env -f infra/compose.yaml ps
+
+Load the schema, seed, and task files:
+
+    type labs\lab01\db\schema.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    type labs\lab01\db\seed.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    type labs\lab01\db\tasks\function.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    type labs\lab01\db\tasks\procedure.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    type labs\lab01\db\tasks\trigger.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+
+Run a single statement:
+
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT order_ref, lab01.calculate_order_total(id) AS total FROM lab01.orders ORDER BY id;"
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "CALL lab01.count_pending_orders();"
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "CALL lab01.update_order_status(1, 'paid');"
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "CALL lab01.get_order_summary(1, NULL, NULL);"
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT sku, stock FROM lab01.products ORDER BY sku;"
+
+## Run commands: OLTP and OLAP
+
+Load and run `db/tasks/oltp_olap.sql` (read-only queries and EXPLAIN ANALYZE):
+
+    type labs\lab01\db\tasks\oltp_olap.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+
+## Run commands: Python (SQL injection)
+
+With `.venv` active, run from `labs\lab01\python`. Python connects through the `POSTGRES_PORT` in `.env`; change it (for example to 5433) if another PostgreSQL already uses 5432.
+
+    .venv\Scripts\activate.bat
+    cd labs\lab01\python
+    python connectivity_check.py
+    python vulnerable_query.py
+    python parameterized_query_starter.py
+
+Inputs to try at the `Customer name:` prompt:
+
+    Amina Hassan
+    ' OR '1'='1
+    x' UNION SELECT email, full_name FROM lab01.customers --
