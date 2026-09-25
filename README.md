@@ -67,6 +67,36 @@ The service may take a short time to become healthy. Verify it from the containe
 docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT current_database(), version();"
 ```
 
+To open an interactive PostgreSQL shell:
+
+```sh
+docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302
+```
+
+### Create and inspect the Lab 1 database objects
+
+Run the schema and sample data once for Lab 1. PowerShell:
+
+```powershell
+Get-Content .\labs\lab01\db\schema.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -v ON_ERROR_STOP=1 -U csai302 -d csai302
+Get-Content .\labs\lab01\db\seed.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -v ON_ERROR_STOP=1 -U csai302 -d csai302
+```
+
+macOS or Linux:
+
+```sh
+docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -v ON_ERROR_STOP=1 -U csai302 -d csai302 < labs/lab01/db/schema.sql
+docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -v ON_ERROR_STOP=1 -U csai302 -d csai302 < labs/lab01/db/seed.sql
+```
+
+Inspect the Lab 1 schema and sample rows:
+
+```sh
+docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "\dt lab01.*"
+docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT * FROM lab01.customers;"
+docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT * FROM lab01.orders;"
+```
+
 Then, with `.venv` active, verify Python can connect:
 
 ```sh
