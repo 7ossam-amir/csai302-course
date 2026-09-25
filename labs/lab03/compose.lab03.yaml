@@ -1,0 +1,68 @@
+# Lab 3: shared-disk emulation with PostgreSQL.
+# Two PostgreSQL servers (node1, node2) attached to ONE data volume.
+# Run only one node at a time: PostgreSQL does not coordinate two servers on the same files.
+name: csai302-lab03
+
+x-postgres-node: &postgres-node
+  image: postgres:17.11
+  restart: "no"  # never auto-start both nodes together after a Docker restart
+  environment:
+    POSTGRES_USER: $POSTGRES_USER
+    POSTGRES_PASSWORD: $POSTGRES_PASSWORD
+    POSTGRES_DB: $POSTGRES_DB
+  volumes:
+    - shared-data:/var/lib/postgresql/data
+    - ./tls:/tls:ro  # certificates from tls/make_certs.py and tls/pg_hba.conf
+  # PostgreSQL refuses a private key that others can read, and files mounted from Windows
+  # look world-readable, so copy them with strict permissions before starting the server.
+  entrypoint: ["sh", "-c"]
+  command:
+    - |
+      install -d -o postgres -g postgres -m 700 /etc/pg-tls
+      install -o postgres -g postgres -m 600 /tls/certs/server.key /etc/pg-tls/
+      install -o postgres -g postgres -m 644 /tls/certs/server.crt /tls/certs/ca.crt /tls/pg_hba.conf /etc/pg-tls/
+      exec docker-entrypoint.sh postgres \
+        -c ssl=on \
+        -c ssl_cert_file=/etc/pg-tls/server.crt \
+        -c ssl_key_file=/etc/pg-tls/server.key \
+        -c ssl_ca_file=/etc/pg-tls/ca.crt \
+        -c ssl_min_protocol_version=TLSv1.2 \
+        -c hba_file=/etc/pg-tls/pg_hba.conf
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+    interval: 5s
+    timeout: 3s
+    retries: 10
+    start_period: 5s
+
+services:
+  node1:
+    <<: *postgres-node
+    ports:
+      - "5434:5432"
+
+  node2:
+    <<: *postgres-node
+    ports:
+      - "5435:5432"
+
+  # S3-compatible object storage. MinIO no longer publishes public images, so this uses
+  # RustFS, a drop-in MinIO alternative: same S3 API, S3 on 9000, web console on 9001.
+  objectstore:
+    image: rustfs/rustfs:1.0.0
+    restart: unless-stopped
+    environment:
+      RUSTFS_ACCESS_KEY: ${S3_ACCESS_KEY:-lab03admin}
+      RUSTFS_SECRET_KEY: ${S3_SECRET_KEY:-lab03-local-only}
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - object-data:/data
+
+volumes:
+  shared-data:
+    name: csai302-lab03-shared-data
+  object-data:
+    name: csai302-lab03-object-data
