@@ -1,0 +1,1268 @@
+\documentclass[12pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{float}
+
+\geometry{margin=1in}
+
+\title{
+    \textbf{CSAI 302 -- Advanced Database Systems}\\
+    \large Lab 2: Buffer Pool Management, Storage Models, and Page Encryption
+}
+\author{}
+\date{Spring 2026}
+
+\begin{document}
+
+\maketitle
+
+\section{Lab Objectives}
+
+The main objectives of this lab are:
+
+\begin{enumerate}
+    \item Implement a Buffer Pool Manager.
+    \item Implement and compare the following replacement policies:
+    \begin{itemize}
+        \item LRU
+        \item Clock
+        \item LRU-K
+        \item 2Q
+    \end{itemize}
+    \item Benchmark the replacement policies using different buffer pool sizes.
+    \item Calculate hit and miss ratios.
+    \item Implement row-oriented storage (NSM).
+    \item Implement column-oriented storage (DSM).
+    \item Convert a row-oriented representation into a column-oriented representation.
+    \item Compare row-oriented and column-oriented storage.
+    \item Encrypt and decrypt database pages.
+    \item Benchmark encrypted and non-encrypted storage.
+\end{enumerate}
+
+\section{Part 1: Buffer Pool Manager}
+
+\subsection{1.1 What is a Buffer Pool?}
+
+A database stores a large amount of data on disk. However, disk access is much slower than accessing data in main memory (RAM).
+
+Therefore, a database does not read every page from disk every time it is requested.
+
+Instead, frequently used pages are temporarily kept in memory inside a structure called the \textbf{Buffer Pool}.
+
+A simple analogy is a student studying from books.
+
+Suppose the books are stored in a library:
+
+\begin{itemize}
+    \item The library represents the disk.
+    \item The student's desk represents RAM.
+    \item A book represents a database page.
+    \item A location on the desk represents a buffer frame.
+\end{itemize}
+
+If the student already has the required book on the desk, there is no need to go to the library.
+
+Similarly, if a database page is already in the buffer pool, the database can use it immediately.
+
+\subsection{1.2 Page and Frame}
+
+A \textbf{page} is a fixed-size unit of data managed by the database.
+
+For example, a database may use pages of:
+
+\[
+4KB,\quad 8KB,\quad 16KB
+\]
+
+depending on the system.
+
+A \textbf{frame} is a slot in the buffer pool that can contain one page.
+
+For example, if the buffer pool has three frames:
+
+\begin{verbatim}
+Frame 0     Frame 1     Frame 2
++-------+   +-------+   +-------+
+|Page 2 |   |Page 5 |   |Page 8 |
++-------+   +-------+   +-------+
+\end{verbatim}
+
+The database has three pages currently resident in memory.
+
+\subsection{1.3 Page Table}
+
+The Buffer Pool Manager needs to know where every resident page is located.
+
+It therefore maintains a mapping:
+
+\[
+PageID \rightarrow FrameID
+\]
+
+For example:
+
+\begin{verbatim}
+Page 2 -> Frame 0
+Page 5 -> Frame 1
+Page 8 -> Frame 2
+\end{verbatim}
+
+This structure is called the \textbf{Page Table}.
+
+\subsection{1.4 Page Hit}
+
+Suppose the query requests Page 5.
+
+The Buffer Pool Manager checks the page table:
+
+\begin{verbatim}
+Page 5 -> Frame 1
+\end{verbatim}
+
+Therefore, Page 5 is already in memory.
+
+This is called a:
+
+\[
+\boxed{\text{Hit}}
+\]
+
+No disk read is required.
+
+\subsection{1.5 Page Miss}
+
+Suppose the query requests Page 10.
+
+The page table does not contain Page 10.
+
+Therefore:
+
+\[
+\boxed{\text{Miss}}
+\]
+
+The Buffer Pool Manager must obtain Page 10 from disk.
+
+If there is an empty frame, Page 10 is loaded directly into that frame.
+
+If all frames are occupied, the Buffer Pool Manager must choose a victim page using a replacement policy.
+
+\subsection{1.6 Dirty Pages}
+
+A page may be modified while it is in memory.
+
+For example, suppose disk contains:
+
+\begin{verbatim}
+Page 5:
+GPA = 3.5
+\end{verbatim}
+
+After an update in memory:
+
+\begin{verbatim}
+Page 5:
+GPA = 3.9
+\end{verbatim}
+
+The in-memory version is now different from the disk version.
+
+Therefore, the page is marked:
+
+\[
+dirty = True
+\]
+
+If a dirty page is selected as a victim, it must be written back to disk before its frame can be reused.
+
+A clean page does not need to be written back because its disk version is already up to date.
+
+\subsection{1.7 Pin Count}
+
+A page may currently be used by a query.
+
+Such a page should not be evicted while it is being used.
+
+The Buffer Pool Manager can therefore maintain:
+
+\[
+pin\_count
+\]
+
+For example:
+
+\begin{verbatim}
+Page 5:
+pin_count = 2
+\end{verbatim}
+
+This means that two users or operations are currently using the page.
+
+Every \emph{fetch} increments the pin count and every \emph{unpin} decrements it. A page with:
+
+\[
+pin\_count > 0
+\]
+
+is not eligible for replacement. Only when the pin count returns to $0$ may the replacement policy choose it.
+
+\subsection{1.8 Complete Page Fetch Flow}
+
+When a query requests Page X, the Buffer Pool Manager performs the following steps:
+
+\begin{enumerate}
+    \item Check the page table.
+    \item If Page X exists, return it immediately (Hit).
+    \item Otherwise, record a Miss.
+    \item Check for a free frame.
+    \item If a free frame exists, use it.
+    \item Otherwise, ask the replacement policy to select a victim.
+    \item Make sure the victim is not pinned.
+    \item If the victim is dirty, write it to disk.
+    \item Read Page X from disk.
+    \item Place Page X into the selected frame.
+    \item Update the page table.
+    \item Increment the pin count and return Page X to the caller.
+\end{enumerate}
+
+The complete process is:
+
+\begin{verbatim}
+            Request Page X
+                  |
+      Is Page X in the page table?
+          /                \
+        Yes                 No
+         |                   |
+        HIT                MISS
+         |                   |
+         |            Free frame exists?
+         |              /          \
+         |            Yes           No
+         |             |             |
+         |             |    Replacement policy
+         |             |    selects a victim
+         |             |             |
+         |             |       Victim dirty?
+         |             |        /        \
+         |             |      Yes         No
+         |             |       |           |
+         |             |  Write victim     |
+         |             |  to disk          |
+         |             |       |           |
+         |             +-------+-----------+
+         |                     |
+         |              Read Page X from disk
+         |              into the frame and
+         |              update the page table
+         |                     |
+         +---------------------+
+                  |
+          pin_count += 1
+                  |
+             Return Page X
+\end{verbatim}
+
+\subsection{1.9 Hit Ratio and Miss Ratio}
+
+The effectiveness of a buffer pool is measured by how often a requested page is already in memory:
+
+\[
+Hit\ Ratio =
+\frac{Hits}{Hits+Misses}
+\qquad
+Miss\ Ratio =
+\frac{Misses}{Hits+Misses}
+\]
+
+Since every access is either a hit or a miss:
+
+\[
+Hit\ Ratio + Miss\ Ratio = 1
+\]
+
+A higher hit ratio means fewer disk reads. Two factors affect it:
+
+\begin{itemize}
+    \item \textbf{Buffer pool size}: more frames can keep more pages in memory, so the hit ratio usually increases with the buffer size.
+    \item \textbf{Replacement policy}: when the buffer is full, a better choice of victim keeps the pages that will be needed again.
+\end{itemize}
+
+However, a larger buffer helps only up to a limit. The first access to every distinct page must be read from disk; this is called a \textbf{compulsory miss}. For example, a workload of 18 requests to 8 distinct pages always has at least 8 misses, so once the buffer can hold all 8 pages, adding more frames does not improve the hit ratio.
+
+\section{Part 2: Replacement Policies}
+
+When the buffer pool is full, the database must decide which page should be removed.
+
+This is the responsibility of the replacement policy. Only unpinned pages can be chosen.
+
+In this lab, four policies are implemented:
+
+\begin{enumerate}
+    \item LRU
+    \item Clock
+    \item LRU-K
+    \item 2Q
+\end{enumerate}
+
+\subsection{2.1 LRU}
+
+LRU stands for:
+
+\[
+\boxed{\text{Least Recently Used}}
+\]
+
+The idea is simple:
+
+\begin{quote}
+Remove the page that has not been used for the longest time.
+\end{quote}
+
+For example, assume three frames and the access sequence:
+
+\[
+A \rightarrow B \rightarrow C \rightarrow A
+\]
+
+After accessing A again, the order from least to most recently used is:
+
+\begin{verbatim}
+B (oldest)  ->  C  ->  A (most recent)
+\end{verbatim}
+
+If a new page D arrives, B is selected as the victim.
+
+\subsubsection{LRU Example}
+
+Consider a buffer pool with three frames and the reference string:
+
+\[
+2,3,2,1,5,3,4,3
+\]
+
+The execution is:
+
+\begin{longtable}{c|c|c|c}
+\toprule
+Step & Page & Result & Buffer Pool \\
+\midrule
+1 & 2 & Miss & [2,-,-] \\
+2 & 3 & Miss & [2,3,-] \\
+3 & 2 & Hit & [2,3,-] \\
+4 & 1 & Miss & [2,3,1] \\
+5 & 5 & Miss & [2,5,1] \\
+6 & 3 & Miss & [3,5,1] \\
+7 & 4 & Miss & [3,5,4] \\
+8 & 3 & Hit & [3,5,4] \\
+\bottomrule
+\end{longtable}
+
+There are:
+
+\[
+Hits = 2
+\]
+
+and:
+
+\[
+Misses = 6
+\]
+
+Therefore:
+
+\[
+Hit\ Ratio =
+\frac{Hits}{Hits+Misses}
+=
+\frac{2}{8}
+=
+0.25
+\]
+
+Thus:
+
+\[
+\boxed{Hit\ Ratio=25\%}
+\]
+
+and:
+
+\[
+\boxed{Miss\ Ratio=75\%}
+\]
+
+\subsubsection{Weakness: Sequential Flooding}
+
+Suppose pages A and B are used constantly (a ``hot'' set), and then a query scans pages
+$1, 2, 3$ exactly once. With three frames:
+
+\begin{verbatim}
+A, B, A, B   -> [A, B, -]
+scan 1       -> [A, B, 1]
+scan 2       -> [B, 1, 2]    (A evicted)
+scan 3       -> [1, 2, 3]    (B evicted)
+A, B         -> Miss, Miss
+\end{verbatim}
+
+Pages that will never be used again pushed out the useful pages. This is called
+\textbf{sequential flooding}, and it motivates LRU-K and 2Q.
+
+\subsection{2.2 Clock Replacement}
+
+Clock is an approximation of LRU.
+
+Instead of maintaining an exact ordering of all pages, Clock uses:
+
+\begin{itemize}
+    \item A circular list of frames.
+    \item A clock hand.
+    \item A reference bit for each frame.
+\end{itemize}
+
+Each frame has:
+
+\[
+reference\_bit \in \{0,1\}
+\]
+
+When a page is accessed, its reference bit is set to 1.
+
+The clock hand scans frames.
+
+\begin{itemize}
+    \item If reference bit = 1, set it to 0 and give the page a second chance.
+    \item If reference bit = 0, the page can be selected as a victim.
+\end{itemize}
+
+\subsubsection{Clock Example}
+
+Suppose:
+
+\begin{verbatim}
+Frame 0 -> A, ref=1
+Frame 1 -> B, ref=0
+Frame 2 -> C, ref=1
+\end{verbatim}
+
+The clock hand points to A.
+
+We need a victim.
+
+First:
+
+\begin{verbatim}
+A: ref=1
+\end{verbatim}
+
+Therefore, A receives a second chance:
+
+\begin{verbatim}
+A: ref 1 -> 0
+\end{verbatim}
+
+The hand moves to B.
+
+B has:
+
+\begin{verbatim}
+B: ref=0
+\end{verbatim}
+
+Therefore, B is selected as the victim.
+
+The important idea is:
+
+\begin{quote}
+A recently used page receives a second chance before being evicted.
+\end{quote}
+
+Clock is cheaper than LRU because an access only sets a bit, instead of reordering a list.
+Because it approximates LRU, it also suffers from sequential flooding.
+
+\subsection{2.3 LRU-K}
+
+LRU-K extends the idea of LRU by considering multiple historical accesses.
+
+The value $K$ specifies how many accesses are considered.
+
+For example:
+
+\begin{itemize}
+    \item LRU-2 considers the last two accesses.
+    \item LRU-3 considers the last three accesses.
+\end{itemize}
+
+The value $K$ is not the number of pages.
+
+It is the amount of access history used for each page.
+
+\subsubsection{Access History Example}
+
+Consider:
+
+\begin{verbatim}
+Step:  1 2 3 4 5 6
+Page:  A B A C B A
+\end{verbatim}
+
+The access history is:
+
+\begin{verbatim}
+A -> 1,3,6
+B -> 2,5
+C -> 4
+\end{verbatim}
+
+For LRU-2:
+
+\begin{verbatim}
+A -> last two accesses = 3,6
+B -> last two accesses = 2,5
+C -> only one access
+\end{verbatim}
+
+For a page with at least $K$ accesses, the backward $K$-distance at current time $t$ can be expressed as:
+
+\[
+D_K(p)=t-H_K(p)
+\]
+
+where $H_K(p)$ is the $K$-th most recent access time of page $p$.
+
+A larger backward $K$-distance means that the relevant historical access is older.
+
+Pages with fewer than $K$ recorded accesses have an undefined $K$-th historical access; canonical LRU-K treats their backward $K$-distance as $+\infty$, so they are evicted first. When several pages have $+\infty$ distance, a tie-breaking rule is needed; in this lab, the page with the oldest access is evicted.
+
+This is why LRU-K resists sequential flooding: pages read only once by a scan have infinite distance and are evicted before pages that were used repeatedly.
+
+\subsubsection{Simple LRU-2 Example}
+
+Suppose the history is:
+
+\begin{verbatim}
+Step:  1 2 3 4 5 6 7
+Page:  A B C A B C A
+\end{verbatim}
+
+At step 7:
+
+\begin{verbatim}
+A -> 1,4,7
+B -> 2,5
+C -> 3,6
+\end{verbatim}
+
+For LRU-2, use the second-most-recent access:
+
+\begin{verbatim}
+A -> 4
+B -> 2
+C -> 3
+\end{verbatim}
+
+At time $t=7$:
+
+\[
+D_2(A)=7-4=3
+\]
+
+\[
+D_2(B)=7-2=5
+\]
+
+\[
+D_2(C)=7-3=4
+\]
+
+The largest distance is for B, so B is selected as the victim.
+
+\subsection{2.4 2Q}
+
+2Q stands for:
+
+\[
+\boxed{\text{Two-Queue}}
+\]
+
+The goal is to prevent one-time sequential scans from destroying useful pages in the buffer pool.
+
+2Q distinguishes between:
+
+\begin{itemize}
+    \item Pages that have been seen recently but only once.
+    \item Pages that have demonstrated repeated use.
+\end{itemize}
+
+The two main queues are:
+
+\begin{verbatim}
+A1 -> recently seen/new pages       (FIFO)
+Am -> pages with repeated use       (LRU)
+\end{verbatim}
+
+A new page enters A1. If it is accessed again while still in A1, it is promoted to Am.
+Victims are taken from A1 first, so pages seen only once cannot push out pages in Am.
+
+A commonly used full 2Q design also maintains an $A1\text{-out}$ ghost queue containing identifiers (not data) of pages recently evicted from $A1$; a page found there on its next access goes directly to Am.
+
+\subsubsection{2Q Example}
+
+Assume four frames and the sequence:
+
+\[
+A,B,A,C,D,E
+\]
+
+Initially:
+
+\begin{verbatim}
+A1 = []
+Am = []
+\end{verbatim}
+
+After accessing A:
+
+\begin{verbatim}
+A1 = [A]
+Am = []
+\end{verbatim}
+
+After B:
+
+\begin{verbatim}
+A1 = [A,B]
+Am = []
+\end{verbatim}
+
+A is accessed again.
+
+A has now demonstrated repeated use, so it is promoted:
+
+\begin{verbatim}
+A1 = [B]
+Am = [A]
+\end{verbatim}
+
+After C and D, all four frames are full:
+
+\begin{verbatim}
+A1 = [B,C,D]
+Am = [A]
+\end{verbatim}
+
+When E arrives, the victim is taken from A1 (the oldest, B), not from Am:
+
+\begin{verbatim}
+A1 = [C,D,E]
+Am = [A]
+\end{verbatim}
+
+The key idea is:
+
+\begin{quote}
+A page that was accessed only once should not immediately become more valuable than a page that has demonstrated repeated use.
+\end{quote}
+
+\subsection{2.5 Summary of Policies}
+
+\begin{center}
+\begin{tabular}{p{0.12\textwidth}|p{0.45\textwidth}|p{0.3\textwidth}}
+\toprule
+Policy & Victim & Sequential flooding \\
+\midrule
+LRU & Least recently used page & Suffers \\
+Clock & First page with reference bit 0 & Suffers (approximates LRU) \\
+LRU-K & Largest backward $K$-distance & Resists \\
+2Q & Oldest page in A1, then LRU in Am & Resists \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{2.6 Effect of the Access Pattern}
+
+Which policy performs best depends on the access pattern:
+
+\begin{itemize}
+    \item \textbf{Uniform random}: no policy can predict the next request, so all policies perform similarly.
+    \item \textbf{Skewed (80--20)}: a small set of pages receives most requests; policies that remember repeated use (LRU-K, 2Q) keep those pages.
+    \item \textbf{Hot set + sequential scan}: LRU and Clock suffer from sequential flooding, while LRU-K and 2Q protect the hot set.
+\end{itemize}
+
+\section{Part 3: Row-Oriented Storage (NSM)}
+
+NSM stands for:
+
+\[
+\boxed{\text{N-ary Storage Model}}
+\]
+
+In row-oriented storage, attributes belonging to the same tuple are stored together.
+
+Consider:
+
+\begin{center}
+\begin{tabular}{c|c|c|c}
+\toprule
+ID & Name & Age & GPA \\
+\midrule
+1 & Ali & 20 & 3.5 \\
+2 & Sara & 21 & 3.8 \\
+3 & Omar & 20 & 3.2 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+A row-oriented representation is:
+
+\begin{verbatim}
+Row 1 = [1, Ali, 20, 3.5]
+Row 2 = [2, Sara, 21, 3.8]
+Row 3 = [3, Omar, 20, 3.2]
+\end{verbatim}
+
+Inside a page, complete rows are placed one after another:
+
+\begin{verbatim}
+Page 0: [header][1,Ali,20,3.5][2,Sara,21,3.8][3,Omar,20,3.2]...
+\end{verbatim}
+
+\subsection{Advantages of Row Storage}
+
+Row storage is useful when a query needs most or all attributes of a tuple.
+
+For example:
+
+\begin{verbatim}
+SELECT *
+FROM Students
+WHERE ID = 2;
+\end{verbatim}
+
+The system needs the complete tuple:
+
+\begin{verbatim}
+[2, Sara, 21, 3.8]
+\end{verbatim}
+
+All of it is in a single page, so one page read is enough.
+
+Row storage is therefore commonly associated with transactional workloads (OLTP).
+
+\section{Part 4: Column-Oriented Storage (DSM)}
+
+DSM stands for:
+
+\[
+\boxed{\text{Decomposition Storage Model}}
+\]
+
+In column-oriented storage, values belonging to the same attribute are stored together.
+
+The same table becomes:
+
+\begin{verbatim}
+ID   = [1, 2, 3]
+
+Name = [Ali, Sara, Omar]
+
+Age  = [20, 21, 20]
+
+GPA  = [3.5, 3.8, 3.2]
+\end{verbatim}
+
+Each column is stored in its own set of pages:
+
+\begin{verbatim}
+ID pages:   [header][1][2][3]...
+Name pages: [header][Ali][Sara][Omar]...
+GPA pages:  [header][3.5][3.8][3.2]...
+\end{verbatim}
+
+To return a complete row, the system must read one page from every column and combine the values. This is called \textbf{tuple reconstruction}.
+
+\section{Part 5: Row Store to Column Store Conversion}
+
+The conversion process reads each row and appends each attribute to the corresponding column.
+
+Suppose:
+
+\begin{verbatim}
+Rows:
+
+[1, Ali, 20, 3.5]
+[2, Sara, 21, 3.8]
+[3, Omar, 20, 3.2]
+\end{verbatim}
+
+After conversion:
+
+\begin{verbatim}
+ID   = [1, 2, 3]
+Name = [Ali, Sara, Omar]
+Age  = [20, 21, 20]
+GPA  = [3.5, 3.8, 3.2]
+\end{verbatim}
+
+The same data is stored in both layouts; only the physical organization changes. After conversion, the results of any query must be identical in both stores.
+
+\section{Part 6: Comparing Row and Column Storage}
+
+The better layout depends on the query pattern.
+
+\subsection{Full Row Query}
+
+Example:
+
+\begin{verbatim}
+SELECT *
+FROM Students
+WHERE ID = 2;
+\end{verbatim}
+
+This type of access needs many attributes from one tuple and is naturally suitable for row-oriented storage.
+
+\subsection{Single Column Aggregation}
+
+Example:
+
+\begin{verbatim}
+SELECT AVG(GPA)
+FROM Students;
+\end{verbatim}
+
+Only the GPA column is required.
+
+A column-oriented representation can scan:
+
+\begin{verbatim}
+GPA = [3.5, 3.8, 3.2, ...]
+\end{verbatim}
+
+without needing to process unrelated columns.
+
+\subsection{Group By Query}
+
+Example:
+
+\begin{verbatim}
+SELECT Age, AVG(GPA)
+FROM Students
+GROUP BY Age;
+\end{verbatim}
+
+The important columns are:
+
+\begin{verbatim}
+Age
+GPA
+\end{verbatim}
+
+A column-oriented layout is therefore well suited to this analytical access pattern.
+
+\subsection{Why Columns Read Fewer Pages}
+
+Assume 4KB pages ($4096$ bytes) and rows of $(ID, Name, GPA)$ with sizes $4 + 20 + 4 = 28$ bytes:
+
+\[
+\text{Rows per page (NSM)} \approx \frac{4096}{28} \approx 146
+\qquad
+\text{GPA values per page (DSM)} \approx \frac{4096}{4} = 1024
+\]
+
+For $200{,}000$ students, computing \texttt{AVG(GPA)} reads approximately:
+
+\[
+\frac{200{,}000}{146} \approx 1370 \text{ pages (NSM)}
+\qquad
+\frac{200{,}000}{1024} \approx 196 \text{ pages (DSM)}
+\]
+
+The column store reads about $7\times$ fewer pages. For a full-row lookup, the opposite happens: the row store reads 1 page, while the column store reads 1 page per column.
+
+\subsection{Storage Comparison}
+
+\begin{center}
+\begin{tabular}{p{0.25\textwidth}|p{0.3\textwidth}|p{0.3\textwidth}}
+\toprule
+ & Row-Oriented (NSM) & Column-Oriented (DSM) \\
+\midrule
+Basic unit & Row/Tuple & Column/Attribute \\
+Full-row access & Good & Requires reconstruction \\
+Few-column analytical queries & Less efficient & Efficient \\
+OLTP & Commonly suitable & Usually less natural \\
+OLAP & Less suitable for wide rows & Commonly suitable \\
+Aggregation & May read unnecessary attributes & Reads selected columns \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\section{Part 7: Encrypting and Decrypting Data Pages}
+
+Database pages may contain sensitive information.
+
+For example:
+
+\begin{verbatim}
+Page 7
+
+Student ID = 10
+Name = Ali
+GPA = 3.8
+\end{verbatim}
+
+Storing the page as plaintext means that someone who obtains the database files may potentially read the contents directly.
+
+Encryption transforms plaintext into ciphertext.
+
+\[
+Plaintext
+\xrightarrow{Encryption}
+Ciphertext
+\]
+
+Decryption performs the reverse operation:
+
+\[
+Ciphertext
+\xrightarrow{Decryption}
+Plaintext
+\]
+
+The important architecture is:
+
+\begin{verbatim}
+             BUFFER POOL
+                  |
+             Plain Page
+                  |
+               Encrypt
+                  |
+                  v
+                DISK
+            Encrypted Page
+\end{verbatim}
+
+When the page is read:
+
+\begin{verbatim}
+                DISK
+            Encrypted Page
+                  |
+               Decrypt
+                  |
+                  v
+             BUFFER POOL
+               Plain Page
+\end{verbatim}
+
+\subsection{7.1 AES-GCM}
+
+AES-GCM is a mode of authenticated encryption.
+
+It provides:
+
+\begin{enumerate}
+    \item Confidentiality.
+    \item Integrity/authentication.
+\end{enumerate}
+
+Confidentiality means that the encrypted contents cannot be directly understood without the key.
+
+Integrity/authentication means that unauthorized modification can be detected.
+
+Conceptually:
+
+\[
+Ciphertext,\ Tag
+=
+AES\text{-}GCM\_Encrypt(Key, Nonce, Plaintext)
+\]
+
+Decryption verifies the authentication tag:
+
+\[
+Plaintext
+=
+AES\text{-}GCM\_Decrypt(Key, Nonce, Ciphertext, Tag)
+\]
+
+If the ciphertext has been modified, authentication should fail.
+
+In this lab, a 256-bit AES key is used.
+
+\subsection{7.2 Nonce}
+
+AES-GCM requires a nonce.
+
+A nonce must never be reused with the same encryption key; reusing it breaks the security of AES-GCM.
+
+A common practical choice is a fresh random 12-byte nonce for every encryption operation.
+
+Therefore, two encryptions can have:
+
+\begin{verbatim}
+Page 7 -> Nonce N1
+Page 8 -> Nonce N2
+Page 7 again -> Nonce N3
+\end{verbatim}
+
+A fresh nonce also means that writing the same page contents twice produces two different ciphertexts.
+
+The nonce does not need to be secret, but it must be stored with the encrypted data because it is needed for decryption.
+
+\subsection{7.3 Authentication Tag}
+
+AES-GCM produces an authentication tag.
+
+Conceptually, the encrypted page can contain:
+
+\begin{verbatim}
+Nonce (12 bytes)
++
+Ciphertext (same size as the page)
++
+Authentication Tag (16 bytes)
+\end{verbatim}
+
+Therefore, each encrypted page on disk is 28 bytes larger than the plain page.
+
+During decryption, the tag is checked.
+
+If someone modifies the ciphertext, the verification fails.
+
+Therefore:
+
+\begin{verbatim}
+Correct Ciphertext
+      |
+      v
+Authentication OK
+      |
+      v
+Decrypt
+\end{verbatim}
+
+while:
+
+\begin{verbatim}
+Modified Ciphertext
+      |
+      v
+Authentication FAILED
+      |
+      v
+Reject
+\end{verbatim}
+
+\subsection{7.4 Page ID as Associated Data}
+
+The page identifier can optionally be supplied as Additional Authenticated Data (AAD).
+
+For example:
+
+\[
+AAD = PageID
+\]
+
+The AAD is not encrypted, but it is included in the tag computation.
+
+This allows the authentication check to bind the ciphertext to its expected page identifier.
+
+If ciphertext belonging to Page 8 is presented as Page 7, authentication fails.
+
+This protects against page-swapping or page-mix-up scenarios.
+
+\section{Part 8: Integrating Encryption with the Buffer Pool}
+
+Encryption should normally happen at the disk boundary.
+
+Suppose Page 5 is dirty:
+
+\begin{verbatim}
+Buffer Pool:
+Page 5
+GPA = 3.9
+dirty = True
+\end{verbatim}
+
+When Page 5 is evicted:
+
+\begin{verbatim}
+Page 5
+   |
+Encrypt using AES-GCM
+   |
+   v
+Encrypted Page 5
+   |
+   v
+Disk
+\end{verbatim}
+
+When Page 5 is requested later:
+
+\begin{verbatim}
+Disk
+ |
+Encrypted Page 5
+ |
+Decrypt
+ |
+Plain Page 5
+ |
+Buffer Pool
+\end{verbatim}
+
+Therefore, the buffer pool can operate on plaintext pages while persistent storage contains encrypted pages.
+
+An important consequence is that encryption and decryption happen \textbf{only on a miss or when a dirty page is written back}. A hit does not touch the disk, so it pays no encryption cost. The higher the hit ratio, the smaller the encryption overhead.
+
+\section{Part 9: Important Concepts to Remember}
+
+\subsection*{Buffer Pool}
+
+The buffer pool is a memory area used to cache database pages and reduce disk I/O.
+
+\subsection*{Page}
+
+A page is a fixed-size unit of database storage.
+
+\subsection*{Frame}
+
+A frame is a slot in the buffer pool that holds one page.
+
+\subsection*{Hit}
+
+A requested page is already in the buffer pool.
+
+\subsection*{Miss}
+
+A requested page is not in the buffer pool and must be fetched from disk.
+
+\subsection*{Pin Count}
+
+The number of operations currently using a page; a pinned page cannot be evicted.
+
+\subsection*{Dirty Page}
+
+A page modified in memory that must be written back to disk before eviction.
+
+\subsection*{LRU}
+
+Evicts the page whose most recent access is the oldest.
+
+\subsection*{Clock}
+
+Uses reference bits and a circular clock hand to provide pages with a second chance.
+
+\subsection*{LRU-K}
+
+Uses the last $K$ accesses of each page to make a replacement decision.
+
+\subsection*{2Q}
+
+Separates recently seen pages from pages that have demonstrated repeated use.
+
+\subsection*{Sequential Flooding}
+
+A one-time scan evicts useful pages from an LRU-based buffer pool.
+
+\subsection*{NSM}
+
+Stores complete tuples/rows together.
+
+\subsection*{DSM}
+
+Stores values of the same attribute/column together.
+
+\subsection*{Tuple Reconstruction}
+
+Combining values from several columns to rebuild a complete row in a column store.
+
+\subsection*{Encryption}
+
+Transforms plaintext into ciphertext to protect data at rest.
+
+\subsection*{Decryption}
+
+Transforms ciphertext back into plaintext.
+
+\subsection*{AES-GCM}
+
+An authenticated encryption mode that provides confidentiality and integrity/authentication.
+
+\section{Part 10: Final System Architecture}
+
+The complete lab can be viewed as the following architecture:
+
+\begin{verbatim}
+                      DATABASE QUERY
+                            |
+             Row Store (NSM) / Column Store (DSM)
+                            |
+                            v
+                   Buffer Pool Manager
+                            |
+                 +----------+----------+
+                 |                     |
+                HIT                   MISS
+                 |                     |
+                 |           Replacement Policy
+                 |        (LRU | Clock | LRU-K | 2Q)
+                 |                     |
+                 |                  Victim
+                 |                     |
+                 |          Dirty? -> AES-GCM Encrypt
+                 |                     |       |
+                 |                     |       v
+                 |                     |     DISK
+                 |                     |       |
+                 |              AES-GCM Decrypt (requested page)
+                 |                     |
+                 +----------+----------+
+                            |
+                        Plain Page
+                            |
+                          Query
+\end{verbatim}
+
+The complete system therefore demonstrates several important database system concepts:
+
+\begin{enumerate}
+    \item Memory management through a buffer pool.
+    \item Cache replacement through multiple replacement policies.
+    \item Performance evaluation using hit/miss ratios.
+    \item Row-oriented and column-oriented physical data organization.
+    \item Conversion between physical storage layouts.
+    \item Protection of persistent database pages through encryption.
+    \item Performance trade-offs introduced by encryption.
+\end{enumerate}
+
+\section{Conclusion}
+
+This lab demonstrates how a database system manages the movement of pages between disk and memory.
+
+The Buffer Pool Manager avoids unnecessary disk accesses by caching frequently used pages in RAM. When the buffer pool becomes full, a replacement policy such as LRU, Clock, LRU-K, or 2Q decides which page can be removed.
+
+The lab also demonstrates two physical storage organizations. NSM stores complete tuples together and is useful for full-row access, while DSM stores values of the same attribute together and is useful for analytical queries that access a subset of columns.
+
+Finally, page encryption protects data stored on disk. AES-GCM provides both confidentiality and authentication, at the cost of extra work on every disk read and write; because hits do not touch the disk, a high hit ratio keeps this cost small.
+
+This lab therefore illustrates an important database-system principle:
+
+\[
+\boxed{
+\text{Performance, Storage Organization, Memory Management, and Security are interconnected.}
+}
+\]
+
+\end{document}
