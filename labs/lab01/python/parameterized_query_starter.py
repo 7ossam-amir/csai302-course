@@ -9,10 +9,10 @@ def find_orders_by_customer_name(name: str) -> list[tuple]:
         SELECT o.order_ref, o.status
         FROM lab01.orders AS o
         JOIN lab01.customers AS c ON c.id = o.customer_id
-        WHERE c.full_name = '<replace with a parameter placeholder>'
+        WHERE c.full_name = %s
     """
     # TODO: Supply the value separately using Psycopg's parameter binding.
-    parameters = ()
+    parameters = (name,)
 
     with connect() as connection:
         return connection.execute(query, parameters).fetchall()
