@@ -70,3 +70,70 @@ Repeat with seed.sql. Substitute values from .env if you changed the local usern
 ## Reset Lab 1 data
 
 Only run this when you intend to discard Lab 1 objects. Execute db/reset.sql, then db/schema.sql, then db/seed.sql. This drops only schema lab01; it does not recreate the course database or remove the Docker volume.
+
+## Run commands (function, procedure, trigger)
+
+Open psql inside the container:
+
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302
+
+Load the task files (PowerShell):
+
+    Get-Content labs/lab01/db/schema.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    Get-Content labs/lab01/db/seed.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    Get-Content labs/lab01/db/tasks/function.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    Get-Content labs/lab01/db/tasks/procedure.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    Get-Content labs/lab01/db/tasks/trigger.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+
+Load the task files (macOS or Linux):
+
+    docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302 < labs/lab01/db/schema.sql
+    docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302 < labs/lab01/db/seed.sql
+    docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302 < labs/lab01/db/tasks/function.sql
+    docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302 < labs/lab01/db/tasks/procedure.sql
+    docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302 < labs/lab01/db/tasks/trigger.sql
+
+### Function
+
+    SELECT lab01.calculate_order_total(1);
+
+    SELECT order_ref, lab01.calculate_order_total(id) AS total
+    FROM lab01.orders
+    ORDER BY id;
+
+    SELECT lab01.calculate_order_total(999);
+
+### Procedure
+
+    CALL lab01.count_pending_orders();
+
+    SELECT id, order_ref, status FROM lab01.orders WHERE id = 1;
+    CALL lab01.update_order_status(1, 'paid');
+    SELECT id, order_ref, status FROM lab01.orders WHERE id = 1;
+
+    CALL lab01.update_order_status(999, 'paid');
+
+    CALL lab01.get_order_summary(1, NULL, NULL);
+
+### Trigger
+
+    SELECT id, sku, stock FROM lab01.products ORDER BY id;
+
+    INSERT INTO lab01.order_items (order_id, product_id, quantity, unit_price)
+    SELECT o.id, p.id, 2, p.unit_price
+    FROM lab01.orders o, lab01.products p
+    WHERE o.order_ref = 'ORD-1004' AND p.sku = 'KB-001';
+
+    SELECT id, sku, stock FROM lab01.products ORDER BY id;
+
+    INSERT INTO lab01.order_items (order_id, product_id, quantity, unit_price)
+    SELECT o.id, p.id, 100, p.unit_price
+    FROM lab01.orders o, lab01.products p
+    WHERE o.order_ref = 'ORD-1004' AND p.sku = 'HD-003';
+
+    SELECT id, sku, stock FROM lab01.products ORDER BY id;
+
+### Verify objects exist
+
+    \df lab01.*
+    SELECT tgname FROM pg_trigger WHERE tgrelid = 'lab01.order_items'::regclass AND NOT tgisinternal;
