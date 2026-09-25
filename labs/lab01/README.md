@@ -60,12 +60,20 @@ From the course repository root, run db/schema.sql and then db/seed.sql against 
 PowerShell:
 
     Get-Content labs/lab01/db/schema.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
+    Get-Content labs/lab01/db/seed.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302
 
 macOS or Linux:
 
     docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302 < labs/lab01/db/schema.sql
+    docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -U csai302 -d csai302 < labs/lab01/db/seed.sql
 
-Repeat with seed.sql. Substitute values from .env if you changed the local username or database name.
+Inspect the loaded objects and sample rows:
+
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "\dt lab01.*"
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT * FROM lab01.customers;"
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT * FROM lab01.orders;"
+
+Substitute values from .env if you changed the local username or database name.
 
 ## Reset Lab 1 data
 

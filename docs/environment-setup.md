@@ -57,7 +57,29 @@ Check a SQL connection from inside the container:
 
     docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT current_database(), version();"
 
+Open an interactive PostgreSQL shell when you need to inspect the database directly:
+
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302
+
 If you changed the local database name or username in .env, use those values in the psql command.
+
+## Create and inspect Lab 1 objects
+
+From the repository root, run the schema and sample data files once. In PowerShell:
+
+    Get-Content .\labs\lab01\db\schema.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -v ON_ERROR_STOP=1 -U csai302 -d csai302
+    Get-Content .\labs\lab01\db\seed.sql | docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -v ON_ERROR_STOP=1 -U csai302 -d csai302
+
+On macOS or Linux:
+
+    docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -v ON_ERROR_STOP=1 -U csai302 -d csai302 < labs/lab01/db/schema.sql
+    docker compose --env-file .env -f infra/compose.yaml exec -T postgres psql -v ON_ERROR_STOP=1 -U csai302 -d csai302 < labs/lab01/db/seed.sql
+
+List the Lab 1 tables and inspect sample rows:
+
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "\dt lab01.*"
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT * FROM lab01.customers;"
+    docker compose --env-file .env -f infra/compose.yaml exec postgres psql -U csai302 -d csai302 -c "SELECT * FROM lab01.orders;"
 
 ## Connect from DBeaver
 
