@@ -98,3 +98,8 @@ Numbers below are from one run; timings change from machine to machine, page cou
 - The OS file cache makes "disk" reads here much faster than a real disk, which makes the
   relative encryption overhead look larger than in a real database. Timings are noisy; run a few
   times.
+
+## Practice
+
+After the lab, do the tasks in [`practice/`](practice/README.md): two more replacement policies
+(FIFO, LFU), a benchmark, queries on both stores, and key rotation for encrypted pages.

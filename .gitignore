@@ -6,6 +6,7 @@ __pycache__/
 .ruff_cache/
 .idea/
 .vscode/
-labs/lab02/*.db
+labs/lab02/**/*.db
 labs/lab03/large_objects/downloads/
 labs/lab03/tls/certs/
+~$*
