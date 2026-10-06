@@ -3,7 +3,6 @@
 CREATE OR REPLACE FUNCTION lab01.calculate_order_total(p_order_id bigint)
 RETURNS numeric(12, 2)
 LANGUAGE plpgsql
-STABLE
 AS $$
 BEGIN
     RETURN (
