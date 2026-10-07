@@ -72,7 +72,7 @@ If an evicted frame ID is reused, treat it as a new admission at the end of the 
 
 Run the Task 1 trace using FIFO with `StudentBufferPool`. Report your trace table, total hits, total misses, and hit ratio in `answers.md`. Compare your measured FIFO and LRU results and explain your observations. Discuss whether this single trace is sufficient to judge performance across workloads.
 
-## Task 3: Query Row and Column Storage — 25 marks
+## Task 3: Query Row and Column Storage 
 
 Implement the following query using both storage layouts:
 
