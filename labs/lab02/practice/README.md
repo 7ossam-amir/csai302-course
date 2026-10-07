@@ -30,8 +30,4 @@ From the repository root:
 .\.venv\Scripts\python.exe labs\lab02\practice\test_student.py
 ```
 
-The starter intentionally raises NotImplementedError. Tests will fail until the required implementation is complete.
 
-## Instructor Note
-
-Distribute this directory with the required Lab 2 support modules. Use STUDENT_TASK.md as the authoritative specification. Assess implementation correctness, explanations, state tracing, and the additional edge-case test. Review the optional encryption task separately from the public tests.
