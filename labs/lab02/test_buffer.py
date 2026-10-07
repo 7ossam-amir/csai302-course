@@ -26,13 +26,28 @@ bpm = run_trace(LRUReplacer, 3, [0, 1, 2, 0, 3, 1])
 assert (bpm.hits, bpm.misses) == (1, 5), (bpm.hits, bpm.misses)
 print("LRU trace ok")
 
-# LRU-2 example: A B A C B then D -> evicts C (seen once), keeps A
-r = LRUKReplacer(3, k=2)
-for fid in [0, 1, 0, 2, 1]:  # A=0, B=1, C=2
+# MySQL-style approximate LRU-K: first access enters Old; second promotes to Young.
+# The seven-frame state mirrors the lecture diagram (internally oldest -> newest).
+r = LRUKReplacer(7, k=2)
+for fid in range(7):
     r.record_access(fid)
     r.set_evictable(fid, True)
-assert r.evict() == 2
-print("LRU-K picks the one-time page ok")
+for fid in [3, 4, 5, 6]:
+    r.record_access(fid)
+assert list(r.young) == [3, 4, 5, 6]
+assert list(r.old) == [0, 1, 2]
+
+# Q1: evict the oldest Old frame (0), then the reused frame re-enters Old.
+assert r.evict() == 0
+r.record_access(0)
+r.set_evictable(0, True)
+assert list(r.old) == [1, 2, 0]
+
+# Q2: promote frame 0; Young overflows, so its oldest frame (3) is demoted.
+r.record_access(0)
+assert list(r.young) == [4, 5, 6, 0]
+assert list(r.old) == [1, 2, 3]
+print("LRU-K Old/Young transitions match the lecture diagram")
 
 # Clock example: A(1) B(0) C(1), hand at A -> evicts B
 c = ClockReplacer(3)

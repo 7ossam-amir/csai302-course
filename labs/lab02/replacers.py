@@ -4,7 +4,7 @@ record_access(fid)       a frame was just used
 set_evictable(fid, ok)   the frame may (ok=True) or may not be evicted (pinned)
 evict() -> fid | None    choose a victim frame, or None if every frame is pinned
 """
-from collections import OrderedDict, deque
+from collections import OrderedDict
 
 
 class LRUReplacer:
@@ -63,41 +63,81 @@ class ClockReplacer:
 
 
 class LRUKReplacer:
-    """Evict the frame with the largest backward K-distance.
+    """Approximate LRU-K with probationary Old and protected Young lists.
 
-    Frames with fewer than K accesses have infinite distance and go first
-    (ties broken by the oldest access).
+    A frame enters Old on its first access. Its Kth access promotes it to
+    Young. Young is kept at roughly 62.5% of the pool; when it grows beyond
+    that target, its least-recent frame is demoted to the newest end of Old.
+    Eviction scans the oldest evictable Old frame first, then Young.
+
+    OrderedDicts run oldest -> newest, the reverse of the lecture diagram's
+    left-to-right newest -> oldest presentation. The class name stays
+    LRUKReplacer so it remains compatible with the lab's buffer manager.
     """
 
-    def __init__(self, num_frames, k=2):
+    def __init__(self, num_frames, k=2, old_list_fraction=0.375):
+        if num_frames < 1:
+            raise ValueError("num_frames must be positive")
+        if k < 1:
+            raise ValueError("k must be positive")
+        if not 0 < old_list_fraction < 1:
+            raise ValueError("old_list_fraction must be between 0 and 1")
+
         self.k = k
-        self.time = 0
-        self.history = {}  # frame_id -> timestamps of the last K accesses
-        self.evictable = {}
+        self.old_target = min(
+            num_frames, max(1, int(num_frames * old_list_fraction + 0.5))
+        )
+        self.young_target = num_frames - self.old_target
+        self.old = OrderedDict()    # frame_id -> evictable, oldest first
+        self.young = OrderedDict()  # frame_id -> evictable, oldest first
+        self.old_accesses = {}      # accesses while a frame is in Old
+
+    def _demote_oldest_young(self):
+        while len(self.young) > self.young_target:
+            fid, evictable = self.young.popitem(last=False)
+            self.old[fid] = evictable
+            # A demoted frame starts a fresh probationary period in Old.
+            self.old_accesses[fid] = 1
 
     def record_access(self, fid):
-        self.time += 1
-        self.history.setdefault(fid, deque(maxlen=self.k)).append(self.time)
-        self.evictable.setdefault(fid, False)
+        if fid in self.young:
+            self.young.move_to_end(fid)
+            return
+
+        if fid in self.old:
+            self.old_accesses[fid] += 1
+            if self.old_accesses[fid] >= self.k and self.young_target > 0:
+                evictable = self.old.pop(fid)
+                del self.old_accesses[fid]
+                self.young[fid] = evictable
+                self._demote_oldest_young()
+            else:
+                self.old.move_to_end(fid)
+            return
+
+        # A new frame gets one probationary access in Old. For K=1 it can
+        # enter Young immediately, provided Young has a nonzero target.
+        if self.k == 1 and self.young_target > 0:
+            self.young[fid] = False
+            self._demote_oldest_young()
+        else:
+            self.old[fid] = False
+            self.old_accesses[fid] = 1
 
     def set_evictable(self, fid, ok):
-        if fid in self.evictable:
-            self.evictable[fid] = ok
+        for queue in (self.old, self.young):
+            if fid in queue:
+                queue[fid] = ok
+                return
 
     def evict(self):
-        victim, best = None, None
-        for fid, h in self.history.items():
-            if not self.evictable[fid]:
-                continue
-            # (0, t): fewer than K accesses -> infinite distance, evicted first
-            # (1, t): h[0] is the K-th most recent access; older = larger distance
-            key = (0, h[0]) if len(h) < self.k else (1, h[0])
-            if best is None or key < best:
-                victim, best = fid, key
-        if victim is not None:
-            del self.history[victim]
-            del self.evictable[victim]
-        return victim
+        for queue in (self.old, self.young):
+            for fid, evictable in queue.items():
+                if evictable:
+                    del queue[fid]
+                    self.old_accesses.pop(fid, None)
+                    return fid
+        return None
 
 
 class TwoQReplacer:

@@ -7,7 +7,7 @@ themselves, filled with generated data (random page requests, 200,000 fake stude
 | File | What it is |
 |---|---|
 | `disk_manager.py` | Reads/writes 4 KB pages in a file, counts disk reads/writes |
-| `replacers.py` | Replacement policies: LRU, Clock, LRU-K (K=2), 2Q |
+| `replacers.py` | Replacement policies: LRU, Clock, approximate LRU-K (Old/Young lists), 2Q |
 | `buffer_pool.py` | Buffer pool manager: page table, pin count, dirty flag, hit/miss |
 | `row_store.py` | Row-oriented storage (NSM) |
 | `column_store.py` | Column-oriented storage (DSM) + `convert_row_to_column` |
@@ -43,24 +43,14 @@ Numbers below are from one run; timings change from machine to machine, page cou
 
 ### 1. Replacement policies (`bench_buffer.py`)
 
-1000 pages, 20,000 requests, same trace for every policy.
+The checked-in chart and hit-ratio figures predate the current Old/Young-list LRU-K approximation,
+so they are not shown as results for this implementation. Run `python bench_buffer.py` from this
+folder to generate a fresh chart and comparison table for the current code.
 
-![hit ratio](buffer_hit_ratio.png)
-
-| hot+scan | LRU | Clock | LRU-2 | 2Q |
-|---|---|---|---|---|
-| 16 frames | 46.5% | 46.5% | 53.3% | 53.3% |
-| 32 frames | 53.5% | 53.5% | 66.6% | 66.6% |
-| 64 frames | 58.1% | 58.4% | 66.6% | 66.6% |
-
-- **uniform**: all policies are equal; hit ratio ≈ buffer size / number of pages. No policy can
-  predict random requests.
-- **80-20**: LRU-2 and 2Q win (e.g. 50% vs 39% at 128 frames) because they keep pages that were
-  requested more than once.
-- **hot+scan**: LRU and Clock suffer from *sequential flooding* — scan pages that are read only
-  once push the hot pages out. LRU-2 treats one-time pages as infinite distance, and 2Q keeps them
-  in the A1 queue, so the hot set survives. Once the buffer is large enough to hold hot set + scan
-  (128+ frames) all policies converge.
+- **uniform**: all policies should be similar; hit ratio is roughly buffer size / number of pages.
+- **80-20**: policies that retain repeatedly used pages can outperform plain LRU.
+- **hot+scan**: the Old/Young split is intended to keep one-time scan pages from immediately
+  displacing pages that have demonstrated repeated use.
 - Clock ≈ LRU everywhere: it is a cheaper approximation of LRU.
 
 ### 2. Row vs column storage (`bench_storage.py`)

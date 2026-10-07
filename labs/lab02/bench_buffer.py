@@ -1,4 +1,4 @@
-"""Hit ratio of LRU / Clock / LRU-2 / 2Q across buffer sizes and workloads.
+"""Hit ratio of LRU / Clock / approximate LRU-K / 2Q across buffer sizes and workloads.
 
 Run: python bench_buffer.py  -> prints tables and saves buffer_hit_ratio.png
 """
@@ -38,7 +38,7 @@ def hot_plus_scan():
 
 
 POLICIES = {"LRU": LRUReplacer, "Clock": ClockReplacer,
-            "LRU-2": LRUKReplacer, "2Q": TwoQReplacer}
+            "LRU-K approx": LRUKReplacer, "2Q": TwoQReplacer}
 SIZES = [8, 16, 32, 64, 128, 256]
 WORKLOADS = {"uniform": uniform, "80-20": eighty_twenty, "hot+scan": hot_plus_scan}
 

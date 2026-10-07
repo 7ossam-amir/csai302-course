@@ -33,7 +33,7 @@ The main objectives of this lab are:
     \begin{itemize}
         \item LRU
         \item Clock
-        \item LRU-K
+        \item LRU-K approximation (Old/Young lists)
         \item 2Q
     \end{itemize}
     \item Benchmark the replacement policies using different buffer pool sizes.
@@ -308,7 +308,7 @@ In this lab, four policies are implemented:
 \begin{enumerate}
     \item LRU
     \item Clock
-    \item LRU-K
+    \item LRU-K approximation (Old/Young lists)
     \item 2Q
 \end{enumerate}
 
@@ -414,7 +414,7 @@ A, B         -> Miss, Miss
 \end{verbatim}
 
 Pages that will never be used again pushed out the useful pages. This is called
-\textbf{sequential flooding}, and it motivates LRU-K and 2Q.
+\textbf{sequential flooding}, and it motivates the LRU-K approximation and 2Q.
 
 \subsection{2.2 Clock Replacement}
 
@@ -488,102 +488,59 @@ A recently used page receives a second chance before being evicted.
 Clock is cheaper than LRU because an access only sets a bit, instead of reordering a list.
 Because it approximates LRU, it also suffers from sequential flooding.
 
-\subsection{2.3 LRU-K}
+\subsection{2.3 LRU-K Approximation: Old and Young Lists}
 
-LRU-K extends the idea of LRU by considering multiple historical accesses.
+Canonical LRU-K compares the time distance to each page's $K$th most recent access. The
+implementation in this lab uses a simpler MySQL-style approximation: two recency lists named
+\textbf{Old} and \textbf{Young}. The class is still named \texttt{LRUKReplacer} so it fits the
+buffer-pool interface, but it does not calculate timestamp distances.
 
-The value $K$ specifies how many accesses are considered.
-
-For example:
+With the default $K=2$, a newly loaded frame enters Old on its first access. A second access
+promotes it to Young, indicating that the page has demonstrated reuse. Further accesses move the
+page toward the newest end of its current list. For $K>2$, the frame must reach the $K$th access
+while it is in Old before promotion.
 
 \begin{itemize}
-    \item LRU-2 considers the last two accesses.
-    \item LRU-3 considers the last three accesses.
+    \item \textbf{Old}: probationary pages with fewer than $K$ accesses since entering Old.
+    \item \textbf{Young}: pages that have demonstrated repeated use.
+    \item Young is capped at about 62.5\% of the frames, leaving an intended 37.5\% Old region.
+          During a cold fill, Old can temporarily contain more than that target.
+    \item If Young grows past its target, its least-recent frame is demoted to the newest end of Old.
+    \item Eviction first selects the oldest unpinned frame in Old. If no Old frame can be evicted,
+          it selects the oldest unpinned frame in Young.
 \end{itemize}
 
-The value $K$ is not the number of pages.
+The diagram presents each list from newest to oldest, left to right. The code stores the same
+ordering in reverse (oldest to newest), which makes the oldest eligible victim easy to find.
 
-It is the amount of access history used for each page.
+\subsubsection{Following the Old/Young Example}
 
-\subsubsection{Access History Example}
-
-Consider:
-
-\begin{verbatim}
-Step:  1 2 3 4 5 6
-Page:  A B A C B A
-\end{verbatim}
-
-The access history is:
+Suppose the seven frames currently represent these pages:
 
 \begin{verbatim}
-A -> 1,3,6
-B -> 2,5
-C -> 4
+Young (newest -> oldest): page4, page5, page9, page3
+Old   (newest -> oldest): page6, page2, page8
 \end{verbatim}
 
-For LRU-2:
+\textbf{Q1:} A miss needs a frame. The oldest Old page is page8, so it is evicted. The new page1
+uses that frame and enters Old at its newest end:
 
 \begin{verbatim}
-A -> last two accesses = 3,6
-B -> last two accesses = 2,5
-C -> only one access
+Old (newest -> oldest): page1, page6, page2
 \end{verbatim}
 
-For a page with at least $K$ accesses, the backward $K$-distance at current time $t$ can be expressed as:
-
-\[
-D_K(p)=t-H_K(p)
-\]
-
-where $H_K(p)$ is the $K$-th most recent access time of page $p$.
-
-A larger backward $K$-distance means that the relevant historical access is older.
-
-Pages with fewer than $K$ recorded accesses have an undefined $K$-th historical access; canonical LRU-K treats their backward $K$-distance as $+\infty$, so they are evicted first. When several pages have $+\infty$ distance, a tie-breaking rule is needed; in this lab, the page with the oldest access is evicted.
-
-This is why LRU-K resists sequential flooding: pages read only once by a scan have infinite distance and are evicted before pages that were used repeatedly.
-
-\subsubsection{Simple LRU-2 Example}
-
-Suppose the history is:
+\textbf{Q2:} page1 is accessed again, so it is promoted from Old to Young. Young temporarily has
+five pages, exceeding its target of four. Its least-recent page, page3, is demoted to the newest
+end of Old:
 
 \begin{verbatim}
-Step:  1 2 3 4 5 6 7
-Page:  A B C A B C A
+Young (newest -> oldest): page1, page4, page5, page9
+Old   (newest -> oldest): page3, page6, page2
 \end{verbatim}
 
-At step 7:
-
-\begin{verbatim}
-A -> 1,4,7
-B -> 2,5
-C -> 3,6
-\end{verbatim}
-
-For LRU-2, use the second-most-recent access:
-
-\begin{verbatim}
-A -> 4
-B -> 2
-C -> 3
-\end{verbatim}
-
-At time $t=7$:
-
-\[
-D_2(A)=7-4=3
-\]
-
-\[
-D_2(B)=7-2=5
-\]
-
-\[
-D_2(C)=7-3=4
-\]
-
-The largest distance is for B, so B is selected as the victim.
+This approximates LRU-K's goal: a one-time scan stays in the probationary region and is generally
+evicted before pages that have proved they are being reused. It is a two-list policy, not the exact
+backward-distance algorithm described in textbooks.
 
 \subsection{2.4 2Q}
 
@@ -681,7 +638,7 @@ Policy & Victim & Sequential flooding \\
 \midrule
 LRU & Least recently used page & Suffers \\
 Clock & First page with reference bit 0 & Suffers (approximates LRU) \\
-LRU-K & Largest backward $K$-distance & Resists \\
+LRU-K approximation & Oldest in Old, then oldest in Young & Helps resist \\
 2Q & Oldest page in A1, then LRU in Am & Resists \\
 \bottomrule
 \end{tabular}
@@ -693,8 +650,8 @@ Which policy performs best depends on the access pattern:
 
 \begin{itemize}
     \item \textbf{Uniform random}: no policy can predict the next request, so all policies perform similarly.
-    \item \textbf{Skewed (80--20)}: a small set of pages receives most requests; policies that remember repeated use (LRU-K, 2Q) keep those pages.
-    \item \textbf{Hot set + sequential scan}: LRU and Clock suffer from sequential flooding, while LRU-K and 2Q protect the hot set.
+    \item \textbf{Skewed (80--20)}: a small set of pages receives most requests; policies that remember repeated use (the LRU-K approximation and 2Q) can keep those pages.
+    \item \textbf{Hot set + sequential scan}: LRU and Clock suffer from sequential flooding, while the LRU-K approximation and 2Q can protect the hot set.
 \end{itemize}
 
 \section{Part 3: Row-Oriented Storage (NSM)}
@@ -1164,9 +1121,9 @@ Evicts the page whose most recent access is the oldest.
 
 Uses reference bits and a circular clock hand to provide pages with a second chance.
 
-\subsection*{LRU-K}
+\subsection*{LRU-K Approximation}
 
-Uses the last $K$ accesses of each page to make a replacement decision.
+Uses Old and Young lists: first accesses are probationary, and repeated accesses promote a frame.
 
 \subsection*{2Q}
 
@@ -1217,7 +1174,7 @@ The complete lab can be viewed as the following architecture:
                 HIT                   MISS
                  |                     |
                  |           Replacement Policy
-                 |        (LRU | Clock | LRU-K | 2Q)
+                 |        (LRU | Clock | LRU-K approx. | 2Q)
                  |                     |
                  |                  Victim
                  |                     |
@@ -1251,7 +1208,7 @@ The complete system therefore demonstrates several important database system con
 
 This lab demonstrates how a database system manages the movement of pages between disk and memory.
 
-The Buffer Pool Manager avoids unnecessary disk accesses by caching frequently used pages in RAM. When the buffer pool becomes full, a replacement policy such as LRU, Clock, LRU-K, or 2Q decides which page can be removed.
+The Buffer Pool Manager avoids unnecessary disk accesses by caching frequently used pages in RAM. When the buffer pool becomes full, a replacement policy such as LRU, Clock, the LRU-K approximation, or 2Q decides which page can be removed.
 
 The lab also demonstrates two physical storage organizations. NSM stores complete tuples together and is useful for full-row access, while DSM stores values of the same attribute together and is useful for analytical queries that access a subset of columns.
 
