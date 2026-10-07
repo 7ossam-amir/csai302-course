@@ -101,5 +101,6 @@ Numbers below are from one run; timings change from machine to machine, page cou
 
 ## Practice
 
-After the lab, do the tasks in [`practice/`](practice/README.md): two more replacement policies
-(FIFO, LFU), a benchmark, queries on both stores, and key rotation for encrypted pages.
+After the lab, complete the coding task in [`practice/`](practice/README.md): implement the
+buffer pool core, add FIFO replacement, and query both storage layouts. Starter code,
+public acceptance tests, a marking rubric, and an optional encryption exercise are included.
