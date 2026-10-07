@@ -4,7 +4,7 @@ Read [STUDENT_TASK.md](STUDENT_TASK.md) for the complete lab practice instructio
 
 ## Provided Files
 
-- `STUDENT_TASK.md`: lab practice instructions in English.
+- `STUDENT_TASK.md`: lab practice instructions 
 - `student.py`: starter code with TODOs.
 - `test_student.py`: nine public acceptance tests.
 
