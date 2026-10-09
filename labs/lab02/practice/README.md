@@ -1,6 +1,6 @@
 # Lab 2 Practice
 
-An easy-to-intermediate activity designed for 45–60 minutes. Read [STUDENT_TASK.md](STUDENT_TASK.md) for the full instructions.
+Read [STUDENT_TASK.md](STUDENT_TASK.md) for the full instructions.
 
 Students use the existing LRU and Clock policies to compare buffer statistics, save and reload a dirty page, and write two average-GPA functions. No replacement policy or buffer pool implementation is required.
 
