@@ -1,37 +1,19 @@
-# Lab 2 Practice — Build and Use a Mini Buffer Pool
+# Lab 2 Practice
 
-Read [STUDENT_TASK.md](STUDENT_TASK.md) for the complete lab practice instructions, implementation requirements, experiments to perform, submission checklist, and marking rubric.
+An easy-to-intermediate activity designed for 45–60 minutes. Read [STUDENT_TASK.md](STUDENT_TASK.md) for the full instructions.
 
-## Provided Files
+Students use the existing LRU and Clock policies to compare buffer statistics, save and reload a dirty page, and write two average-GPA functions. No replacement policy or buffer pool implementation is required.
 
-- `STUDENT_TASK.md`: lab practice instructions in English.
-- `student.py`: starter code with TODOs.
-- `test_student.py`: nine public acceptance tests.
+## Files
 
-Use the existing Lab 2 support modules: DiskManager, LRUReplacer, RowStore, ColumnStore, and EncryptedDiskManager for the optional bonus.
+- `student.py`: four guided function stubs.
+- `test_student.py`: checks for trace execution, page persistence, and average functions.
+- `STUDENT_TASK.md`: requirements and submission instructions.
 
-## Practice Overview
+Submit the completed functions, an experiment script, and your own measured results.
 
-| Task | Marks | Suggested time |
-|---|---:|---:|
-| Complete the buffer pool operations | 45 | 50 minutes |
-| Implement FIFO and compare it with LRU | 20 | 20 minutes |
-| Query both layouts and measure page reads | 25 | 30 minutes |
-| Explain results and add an edge-case test | 10 | 20 minutes |
-| Optional encryption and tamper detection | +10 | Optional |
-
-Work individually. PostgreSQL and additional packages are not required for the core tasks.
-
-## Running the Tests
-
-From the repository root:
+## Run
 
 ```powershell
 .\.venv\Scripts\python.exe labs\lab02\practice\test_student.py
 ```
-
-The starter intentionally raises NotImplementedError. Tests will fail until the required implementation is complete.
-
-## Instructor Note
-
-Distribute this directory with the required Lab 2 support modules. Use STUDENT_TASK.md as the authoritative specification. Assess implementation correctness, explanations, state tracing, and the additional edge-case test. Review the optional encryption task separately from the public tests.

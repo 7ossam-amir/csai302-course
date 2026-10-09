@@ -101,6 +101,7 @@ Numbers below are from one run; timings change from machine to machine, page cou
 
 ## Practice
 
-After the lab, complete the coding task in [`practice/`](practice/README.md): implement the
-buffer pool core, add FIFO replacement, and query both storage layouts. Starter code,
-public acceptance tests, a marking rubric, and an optional encryption exercise are included.
+After the lab, complete the easy-to-intermediate task in [`practice/`](practice/README.md):
+compare the existing LRU and Clock policies, save and reload a dirty page, and write
+average-GPA queries for both storage layouts. Guided starter code and
+public checks are included.
