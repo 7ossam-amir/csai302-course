@@ -1,7 +1,5 @@
 # Lab 2 Practice
 
-Difficulty: easy to intermediate. Suggested time: 45–60 minutes.
-
 Apply the existing Lab 2 code by completing four short functions in `student.py`. Use `LRUReplacer`, `ClockReplacer`, `BufferPoolManager`, and `DiskManager` as provided. You do not need to implement a new replacement policy or rewrite the buffer pool.
 
 ## Task 1 — Compare LRU and Clock
