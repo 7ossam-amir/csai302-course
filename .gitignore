@@ -10,3 +10,5 @@ labs/lab02/**/*.db
 labs/lab03/large_objects/downloads/
 labs/lab03/tls/certs/
 ~$*
+
+labs/lab03/practice/downloads/

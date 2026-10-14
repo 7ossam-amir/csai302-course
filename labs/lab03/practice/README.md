@@ -1,16 +1,15 @@
 # Lab 3 Practice
 
-An easy-to-intermediate activity designed for 45–60 minutes. Read [STUDENT_TASK.md](STUDENT_TASK.md) for the full instructions.
+An intermediate activity designed for about 60 minutes. Read [STUDENT_TASK.md](STUDENT_TASK.md) for the full instructions.
 
-Students use the existing object store and TLS connection to list one student's objects, detect rows and objects that no longer match, delete a document from both systems in a safe order, and inspect the TLS session. No change to the lab scripts, certificates or Docker services is required.
+Students repeat the four parts of the lab on a different topic, a small library: shared-disk failover between `node1` and `node2`, a pointer table for book files, uploading and downloading the files through the object store, and checking the TLS connection. Everything uses the schema and bucket `practice03`, so the `lab03` data is not affected.
 
 ## Files
 
-- `student.py`: four guided function stubs.
-- `test_student.py`: checks for prefix listing, inconsistency detection, document deletion, and TLS details.
+- `schema.sql`: the `practice03` tables to complete.
+- `library.py`: five guided function stubs and a ready command line.
+- `test_student.py`: checks for the tables, upload, listing, download, and TLS.
 - `STUDENT_TASK.md`: requirements and submission instructions.
-
-Submit the completed functions, an experiment script, and your own measured results.
 
 ## Run
 

@@ -1,56 +1,37 @@
-"""Public checks; complete student.py before running.
+"""Public checks; complete schema.sql and library.py before running.
 
-They need node1 and the object store running, and use only the test students below,
-so your own lab03 rows and objects are not touched.
+They need node1 and the object store running, and use only book 9001 (and the unused id
+999999), so your own practice03 rows and files are not touched.
 """
 import hashlib
 import socket
+import tempfile
 import unittest
 from pathlib import Path
 
 from botocore.exceptions import ClientError
 
-import student
-from common import BUCKET, connect_db, s3_client
+import library
+from library import BUCKET, connect_db, s3_client
 
-SCHEMA = Path(__file__).resolve().parents[1] / "large_objects" / "schema.sql"
-TEST_STUDENTS = [9001, 90010]  # 'students/9001' is also a prefix of 'students/90010/'
+TEST_BOOK = 9001
+MISSING_BOOK = 999999
+TEST_NAME = "practice-test-9001.txt"
 
 
 def cleanup():
     s3 = s3_client()
     with connect_db() as conn:
-        conn.execute("DELETE FROM lab03.documents WHERE student_id = ANY(%s)", (TEST_STUDENTS,))
-        conn.execute("DELETE FROM lab03.students WHERE id = ANY(%s)", (TEST_STUDENTS,))
-    for student_id in TEST_STUDENTS:
-        listing = s3.list_objects_v2(Bucket=BUCKET, Prefix=f"students/{student_id}/")
+        conn.execute("DELETE FROM practice03.book_files WHERE book_id = %s", (TEST_BOOK,))
+        conn.execute("DELETE FROM practice03.books WHERE id = %s", (TEST_BOOK,))
+    for book_id in (TEST_BOOK, MISSING_BOOK):
+        listing = s3.list_objects_v2(Bucket=BUCKET, Prefix=f"books/{book_id}/")
         for obj in listing.get("Contents", []):
             s3.delete_object(Bucket=BUCKET, Key=obj["Key"])
+    (library.OUT_DIR / TEST_NAME).unlink(missing_ok=True)
 
 
-def add_document(conn, s3, student_id, name, data):
-    """Store an object and its pointer row, like upload.py but with a predictable key."""
-    key = f"students/{student_id}/{name}"
-    s3.put_object(Bucket=BUCKET, Key=key, Body=data, ContentType="text/plain")
-    (doc_id,) = conn.execute(
-        """INSERT INTO lab03.documents
-               (student_id, file_name, content_type, size_bytes, sha256, bucket, object_key)
-           VALUES (%s, %s, 'text/plain', %s, %s, %s, %s) RETURNING id""",
-        (student_id, name, len(data), hashlib.sha256(data).hexdigest(), BUCKET, key),
-    ).fetchone()
-    conn.commit()
-    return doc_id, key
-
-
-def object_exists(s3, key):
-    try:
-        s3.head_object(Bucket=BUCKET, Key=key)
-        return True
-    except ClientError:
-        return False
-
-
-class Lab03PracticeTests(unittest.TestCase):
+class LibraryTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         for name, port in (("node1", 5434), ("objectstore", 9000)):  # fail fast, do not hang
@@ -59,76 +40,79 @@ class Lab03PracticeTests(unittest.TestCase):
             except OSError:
                 raise RuntimeError(f"{name} is not reachable on port {port}: start Docker Desktop "
                                    "and the lab services first (see the lab README)") from None
-        try:
-            with connect_db() as conn:
-                conn.execute(SCHEMA.read_text())
-            s3 = s3_client()
-            if BUCKET not in [b["Name"] for b in s3.list_buckets()["Buckets"]]:
-                s3.create_bucket(Bucket=BUCKET)
-        except Exception as e:
-            raise RuntimeError("start node1 and objectstore first (see the lab README)") from e
+        library.setup()
+        library.setup()  # running it twice must also work
 
     def setUp(self):
         cleanup()
         self.s3 = s3_client()
-        self.conn = connect_db()
-        self.conn.execute(
-            "INSERT INTO lab03.students VALUES (9001, 'Test A', 3.00, 'practice'),"
-            " (90010, 'Test B', 3.00, 'practice')"
-        )
-        self.conn.commit()
+        with connect_db() as conn:
+            conn.execute("INSERT INTO practice03.books (id, title, author, written_by)"
+                         " VALUES (%s, 'Test Book', 'Tester', 'node1')", (TEST_BOOK,))
+        self.folder = tempfile.TemporaryDirectory()
+        self.file = Path(self.folder.name) / TEST_NAME
+        self.data = b"chapter 1: shared disk\n" * 100
+        self.file.write_bytes(self.data)
 
     def tearDown(self):
-        self.conn.close()
+        self.folder.cleanup()
         cleanup()
 
-    def test_list_student_objects(self):
-        self.assertEqual(student.list_student_objects(self.s3, BUCKET, 9001), [])
-        add_document(self.conn, self.s3, 9001, "b.txt", b"12345")
-        add_document(self.conn, self.s3, 9001, "a.txt", b"123")
-        add_document(self.conn, self.s3, 90010, "other.txt", b"1")  # a different student
-        self.assertEqual(
-            student.list_student_objects(self.s3, BUCKET, 9001),
-            [("students/9001/a.txt", 3), ("students/9001/b.txt", 5)],
-        )
+    def test_bucket_and_tables_exist(self):
+        self.assertIn(BUCKET, [b["Name"] for b in self.s3.list_buckets()["Buckets"]])
+        with connect_db() as conn:
+            columns = {r[0] for r in conn.execute(
+                "SELECT column_name FROM information_schema.columns"
+                " WHERE table_schema = 'practice03' AND table_name = 'book_files'").fetchall()}
+        self.assertTrue({"book_id", "file_name", "content_type", "size_bytes", "sha256",
+                         "bucket", "object_key", "uploaded_at"} <= columns)
 
-    def test_find_inconsistencies(self):
-        prefix = "students/9001/"
-        _, kept = add_document(self.conn, self.s3, 9001, "kept.txt", b"kept")
-        _, lost = add_document(self.conn, self.s3, 9001, "lost.txt", b"lost")
-        add_document(self.conn, self.s3, 90010, "other.txt", b"other")  # outside the prefix
-        clean = {"missing_objects": [], "orphan_objects": []}
-        self.assertEqual(student.find_inconsistencies(self.conn, self.s3, BUCKET, prefix), clean)
+    def test_upload_stores_bytes_and_pointer(self):
+        file_id, key = library.upload_file(TEST_BOOK, self.file)
+        self.assertTrue(key.startswith(f"books/{TEST_BOOK}/"))
+        self.assertTrue(key.endswith("-" + TEST_NAME))
+        stored = self.s3.get_object(Bucket=BUCKET, Key=key)["Body"].read()
+        self.assertEqual(stored, self.data)
+        with connect_db() as conn:
+            row = conn.execute(
+                "SELECT book_id, file_name, size_bytes, sha256, bucket, object_key"
+                " FROM practice03.book_files WHERE id = %s", (file_id,)).fetchone()
+        self.assertEqual(row, (TEST_BOOK, TEST_NAME, len(self.data),
+                               hashlib.sha256(self.data).hexdigest(), BUCKET, key))
 
-        self.s3.delete_object(Bucket=BUCKET, Key=lost)  # a row whose object is gone
-        for name in ("z-orphan.txt", "a-orphan.txt"):  # objects that no row points to
-            self.s3.put_object(Bucket=BUCKET, Key=prefix + name, Body=b"orphan")
-        self.s3.delete_object(Bucket=BUCKET, Key="students/90010/other.txt")
-        self.assertEqual(
-            student.find_inconsistencies(self.conn, self.s3, BUCKET, prefix),
-            {"missing_objects": [lost], "orphan_objects": [prefix + "a-orphan.txt",
-                                                           prefix + "z-orphan.txt"]},
-        )
-        self.assertTrue(object_exists(self.s3, kept))  # the check only reads
+    def test_same_name_twice_does_not_overwrite(self):
+        _, first = library.upload_file(TEST_BOOK, self.file)
+        _, second = library.upload_file(TEST_BOOK, self.file)
+        self.assertNotEqual(first, second)
 
-    def test_delete_document(self):
-        doc_id, key = add_document(self.conn, self.s3, 9001, "gone.txt", b"gone")
-        other_id, other_key = add_document(self.conn, self.s3, 9001, "stays.txt", b"stays")
-        self.assertIs(student.delete_document(self.conn, self.s3, doc_id), True)
-        self.assertFalse(object_exists(self.s3, key))
-        with connect_db() as fresh:  # a new connection sees only committed changes
-            ids = [r[0] for r in fresh.execute(
-                "SELECT id FROM lab03.documents WHERE student_id = 9001").fetchall()]
-        self.assertEqual(ids, [other_id])
-        self.assertTrue(object_exists(self.s3, other_key))
-        self.assertIs(student.delete_document(self.conn, self.s3, doc_id), False)
+    def test_unknown_book_leaves_no_object(self):
+        with self.assertRaises(Exception):
+            library.upload_file(MISSING_BOOK, self.file)
+        listing = self.s3.list_objects_v2(Bucket=BUCKET, Prefix=f"books/{MISSING_BOOK}/")
+        self.assertEqual(listing.get("Contents", []), [])
+
+    def test_list_files(self):
+        self.assertEqual(library.list_files(TEST_BOOK), [])
+        first, _ = library.upload_file(TEST_BOOK, self.file)
+        second, _ = library.upload_file(TEST_BOOK, self.file)
+        self.assertEqual(library.list_files(TEST_BOOK), [(first, TEST_NAME, len(self.data)),
+                                                         (second, TEST_NAME, len(self.data))])
+
+    def test_download_verifies_the_file(self):
+        file_id, key = library.upload_file(TEST_BOOK, self.file)
+        out = library.download_file(file_id)
+        self.assertEqual(Path(out), library.OUT_DIR / TEST_NAME)
+        self.assertEqual(Path(out).read_bytes(), self.data)
+        self.assertIsNone(library.download_file(-1))
+        self.s3.put_object(Bucket=BUCKET, Key=key, Body=b"changed behind our back")
+        with self.assertRaises(ValueError):
+            library.download_file(file_id)
 
     def test_tls_info(self):
-        info = student.tls_info(self.conn)
+        info = library.tls_info()
         self.assertEqual(set(info), {"ssl", "version", "cipher"})
         self.assertIs(info["ssl"], True)
         self.assertTrue(info["version"].startswith("TLSv1."))
-        self.assertTrue(info["cipher"])
 
 
 if __name__ == "__main__":
