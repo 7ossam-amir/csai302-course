@@ -196,3 +196,10 @@ database is not affected):
 ```powershell
 docker compose --env-file .env -f labs/lab03/compose.lab03.yaml down -v
 ```
+
+## Practice
+
+After the lab, complete the easy-to-intermediate task in [`practice/`](practice/README.md):
+list one student's objects by prefix, detect rows and objects that no longer match, delete a
+document from both systems in a safe order, and inspect the TLS session. Guided starter code and
+public checks are included.
