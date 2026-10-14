@@ -1,89 +1,87 @@
-# Lab 3 Practice
+# Lab 3 Practice — A Small Library
 
-Difficulty: intermediate. Suggested time: 45–60 minutes.
+Difficulty: intermediate. Suggested time: 60 minutes.
 
-In the lab, `upload.py` stored each file in two places: the **bytes** in the object store, and a **row** in `lab03.documents` that points to them (`bucket` + `object_key`). In this practice you write four small functions that work with both places, then a short script that uses them.
+Repeat the four parts of the lab on a different topic. Instead of students and their documents, you build a small **library**: books in PostgreSQL, and the books' files (covers, PDFs, notes) in object storage. Everything lives in the schema `practice03` and the bucket `practice03`, so it does not affect the `lab03` data.
 
-Everything you need is already in the lab: `connect_db()`, `s3_client()` and `BUCKET` come from `large_objects/common.py`, and `upload.py` / `download.py` show the same kind of calls. Each function in `student.py` has hints that name the exact calls to use.
+Use the same services as the lab (`node1`, `node2`, `objectstore`) and the same certificates. Each step below names the lab file to copy the idea from.
 
 ## Before you start
 
-1. `node1` and `objectstore` are running (only one of `node1` / `node2` may run at a time).
-2. You ran `python labs/lab03/large_objects/setup.py` once.
-3. You uploaded at least one file with `upload.py`.
+- Docker Desktop is running, and you ran `tls/make_certs.py` during the lab.
+- `node1` and `objectstore` are running. **Only one of `node1` / `node2` may run at a time.**
 
-## Task 1 — Is my connection encrypted? (`tls_info`)
+## Part 1 — Shared disk: two nodes, one library
 
-Run one query on `pg_stat_ssl` and return its three values in a dictionary:
+Like Part 1 of the lab, but with books.
 
-```python
-{'ssl': True, 'version': 'TLSv1.3', 'cipher': 'TLS_AES_256_GCM_SHA384'}
-```
+1. On `node1`, create the schema and the books table, and add three books with `written_by = 'node1'`:
 
-## Task 2 — Which files does a student have? (`list_student_objects`)
+   ```powershell
+   docker exec csai302-lab03-node1-1 psql -U csai302 -d csai302 -c "CREATE SCHEMA IF NOT EXISTS practice03; CREATE TABLE IF NOT EXISTS practice03.books (id int PRIMARY KEY, title text NOT NULL, author text NOT NULL, written_by text);"
+   ```
 
-Ask the object store for all keys that start with `students/<student_id>/` and return `(key, size)` pairs sorted by key. If the student has no files, return `[]`.
+   Write the `INSERT` for the three books yourself.
+2. Stop `node1`, start `node2`, and show that `node2` sees the three books.
+3. From `node2`, add a fourth book with `written_by = 'node2'`.
+4. Stop `node2`, start `node1` again, and show that `node1` sees all four books.
 
-```python
-list_student_objects(s3, "lab03", 5)
-# [('students/5/aa11-notes.txt', 120), ('students/5/bb22-lab.pdf', 9000)]
-```
+Leave `node1` running for the next parts.
 
-## Task 3 — Delete a document from both places (`delete_document`)
+## Part 2 — Database schema for the files (`schema.sql`)
 
-1. Find the row's `bucket` and `object_key`. No row → return `False`.
-2. Delete the row and `commit()`.
-3. Delete the object, then return `True`.
+Complete `schema.sql`. It must create both tables (`books` and `book_files`) with `CREATE TABLE IF NOT EXISTS`. The column list is in the comments. Copy the idea from `large_objects/schema.sql`: `book_files` stores the file's metadata and its address (`bucket` + `object_key`), never the bytes.
 
-Delete the row **first**. If the program stops between steps 2 and 3, only an unused object is left. With the opposite order, a row would point to a file that no longer exists.
+## Part 3 — Files in object storage (`library.py`)
 
-## Task 4 — Find what does not match (`find_inconsistencies`)
+Complete the five functions in `library.py`. The command-line part at the bottom is already written.
 
-The two places can disagree, for example after a crash or a manual delete. Collect the keys from each place as a set and compare them:
-
-| Problem | Meaning | How to compute |
+| Function | Copy the idea from | What it does |
 |---|---|---|
-| `missing_objects` | a row exists, the file does not | keys in PostgreSQL − keys in the object store |
-| `orphan_objects` | a file exists, no row points to it | keys in the object store − keys in PostgreSQL |
+| `setup()` | `large_objects/setup.py` | runs `schema.sql`, creates the bucket `practice03` if missing |
+| `upload_file(book_id, path)` | `large_objects/upload.py` | key `books/<book_id>/<uuid>-<name>`, `put_object`, then `INSERT`; if the `INSERT` fails, delete the object and re-raise |
+| `list_files(book_id)` | `list_documents()` in `download.py` | returns `[(file_id, file_name, size_bytes), ...]` ordered by id |
+| `download_file(file_id)` | `download()` in `download.py` | looks up the row, fetches the object, checks the SHA-256, saves into `practice/downloads/`; returns the path, or `None` for an unknown id; raises `ValueError` if the fingerprint does not match |
+| `tls_info()` | `tls/check_tls.py` | returns `{'ssl': ..., 'version': ..., 'cipher': ...}` |
 
-```python
-find_inconsistencies(conn, s3, "lab03", "students/5/")
-# {'missing_objects': [], 'orphan_objects': ['students/5/extra.txt']}
+Then run, from the repository root:
+
+```powershell
+python labs/lab03/practice/library.py setup
+python labs/lab03/practice/library.py upload 1 <a file of your choice>
+python labs/lab03/practice/library.py upload 2 <another file>
+python labs/lab03/practice/library.py list 1
+python labs/lab03/practice/library.py download <the file id printed by upload>
+python labs/lab03/practice/library.py upload 99 <any file>
 ```
 
-This function only reports. It does not delete or fix anything.
+The last command uses a book that does not exist. It must fail, and no object may be left under `books/99/`. Check this in the web console (<http://localhost:9001/rustfs/console/>, bucket `practice03`).
 
-## Experiment
+## Part 4 — TLS
 
-Create `experiment.py` beside `student.py`. Start it with:
+1. Run `python labs/lab03/practice/library.py tls` and record the TLS version and cipher.
+2. Run `python labs/lab03/tls/check_tls.py` again. For each of the five tests, write one line explaining why it was accepted or refused.
 
-```python
-from student import BUCKET, connect_db, s3_client, tls_info, list_student_objects, \
-    delete_document, find_inconsistencies
-from upload import upload
-```
-
-Choose a student id that exists in `lab03.students`, then:
-
-1. Print `tls_info` for a connection from `connect_db()`.
-2. Upload two small files of your own for that student with `upload(student_id, path)`, and print `list_student_objects`.
-3. Delete one of the two objects directly with `s3.delete_object(...)`. Print `find_inconsistencies` for the student's prefix: it should report that key as missing. Fix it with `delete_document` (use the document id that `upload` returned), and print `find_inconsistencies` again: both lists should be empty.
-
-## What to Submit
-
-- `student.py`: the four completed functions.
-- `experiment.py`: the three steps above.
-- `results.md`: the output of `test_student.py` and of `experiment.py`, and short answers:
-  1. In Task 2, why does the prefix end with `/`? What would go wrong for student 1 without it?
-  2. In Task 3, if the program stops after deleting the row but before deleting the object, what is left behind? Which list of Task 4 would show it?
-
-## Run
-
-From the repository root:
+## Check your work
 
 ```powershell
 .\.venv\Scripts\python.exe labs\lab03\practice\test_student.py
-.\.venv\Scripts\python.exe labs\lab03\practice\experiment.py
 ```
 
-The starter raises `NotImplementedError` until completed. The checks create and remove their own test students (ids 9001 and 90010) and never touch your rows or files. Do not modify the provided checks or the original lab modules. Do not submit certificates, keys, downloaded files or your virtual environment.
+The checks use only book 9001, which they create and delete themselves, so your own books and files are not touched. `library.py` raises `NotImplementedError` until completed.
+
+## What to Submit
+
+- `schema.sql` and `library.py`, completed.
+- `results.md` with:
+  - the commands and output of Part 1 (from both nodes),
+  - the output of the Part 3 commands, including the failed upload, and a screenshot of the bucket in the web console,
+  - the output of Part 4 and your five explanations,
+  - the output of `test_student.py`,
+  - short answers:
+    1. In Part 1, why must `node1` be stopped before `node2` starts?
+    2. Why does `book_files` store `object_key` instead of the file itself (`BYTEA`)?
+    3. Why does the key contain a uuid?
+    4. What is the difference between `sslmode=require` and `sslmode=verify-full`?
+
+Do not modify the provided checks or the original lab files. Do not submit certificates, keys, the `downloads/` folder or your virtual environment.
