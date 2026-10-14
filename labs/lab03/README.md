@@ -196,3 +196,9 @@ database is not affected):
 ```powershell
 docker compose --env-file .env -f labs/lab03/compose.lab03.yaml down -v
 ```
+
+## Practice
+
+After the lab, complete the task in [`practice/`](practice/README.md): repeat the four parts of
+the lab on a small library (books in PostgreSQL, their files in object storage), using the
+schema and bucket `practice03`. Starter files and public checks are included.
