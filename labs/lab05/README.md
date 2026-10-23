@@ -1,64 +1,163 @@
-# Lab 5 — ORM, Secure Queries, and Query Execution
+# Lab 5 — ORM, Safe Queries, and Query Execution
 
-Completed reference implementation using SQLAlchemy 2.x, NumPy and the existing course Python environment. SQLite runs the ORM exercise without a server; `--postgres` uses the shared course PostgreSQL database and `.env`. Only `lab05_customers` and `lab05_orders` are created; existing lab tables are untouched. Seed data is inserted only when the customers table is empty.
+This lab connects two sides of database work. First, you’ll use a small Python
+application to read and write customer orders safely. Then you’ll build simple query
+operators and compare processing one row at a time with processing batches of rows.
+The final example uses a hash join to show where vectorized CPU operations can help.
 
-## Run from the repository root (PowerShell)
+You can run the main exercises with Python and SQLite; PostgreSQL is optional. The
+native C++ SSE2 example is an extension for comparing an explicit SIMD implementation
+with the Python versions.
+
+## Start here
+
+Run these commands from the repository root with the course `.venv` active:
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r labs\lab05\requirements.txt
-.\.venv\Scripts\python.exe labs\lab05\orm_demo.py
-.\.venv\Scripts\python.exe labs\lab05\test_lab05.py
-.\.venv\Scripts\python.exe labs\lab05\bench_executor.py
+python -m pip install -r labs\lab05\requirements.txt
+python labs\lab05\orm_demo.py
+python labs\lab05\test_lab05.py
+python labs\lab05\bench_executor.py
 ```
 
-Optional PostgreSQL run, after starting the course database:
+The first run installs SQLAlchemy and NumPy in the course environment. The demo uses
+an in-memory SQLite database by default, so it does not require Docker or a running
+PostgreSQL server.
+
+To try the same ORM example with the course PostgreSQL database, start that database
+first, check that the repository-root `.env` has the correct connection settings, and
+run:
 
 ```powershell
-.\.venv\Scripts\python.exe labs\lab05\orm_demo.py --postgres
+python labs\lab05\orm_demo.py --postgres
 ```
 
-## Requirements mapped to implementation
+The PostgreSQL run creates only `lab05_customers` and `lab05_orders`; it does not
+drop or modify tables from other labs. Sample rows are inserted only when the customer
+table is empty. The default SQLite run and the tests use temporary in-memory data.
 
-| Requirement | Implementation |
-|---|---|
-| ORM integration | `orm_demo.py`: Customer and Order mapped classes, Session, select, transactions |
-| Parameterized execution | ORM comparison and `text(... :minimum)` with a separate parameter dictionary |
-| Role-based query access | QueryService checks read/report/write permissions before database execution |
-| Volcano iterator model | `executors.py`: Scan → Filter → Project, open/next/close, one row per call |
-| Simple vectorized executor | VectorScan → VectorFilter → VectorProject, column arrays and Boolean masks per batch |
-| SIMD optimized hash join | `simd_hash_join.cpp`: explicit SSE2 four-lane int32 comparison; Python also includes a NumPy version |
+## Part 1 — Use the ORM and keep queries safe
 
-## What to explain in the lab
+Start with `orm_demo.py`. The `Customer` and `Order` Python classes describe two
+database tables, including the foreign key from each order to its customer. SQLAlchemy
+uses those mappings to build and run queries. The `seed()` function creates the two
+tables if needed and adds a few sample customers and orders when the customer table is
+empty.
 
-SQLAlchemy maps Python classes to tables. A Session tracks objects and manages a transaction. The ORM query `Customer.name == name` binds the value; it does not paste it into SQL. The raw report uses `:minimum` with a parameter dictionary. The injection string is treated as data and returns no customers. Parameters bind values, not table or column identifiers: dynamic identifiers require an explicit allowlist.
+The demo then sends requests through `QueryService`:
 
-The viewer can look up customers, the analyst can also run reports, and the admin can write orders. Unknown roles are denied. This is application-level authorization: the service's role must be supplied by trusted authentication. The demo does not implement login or PostgreSQL database roles, and code with direct access to the Session can bypass the service. A deployed system must protect that boundary and use least-privilege database credentials.
+- A `viewer` can look up a customer.
+- An `analyst` can also run a report for orders above a minimum amount.
+- An `admin` can read, report, and add orders.
+- Unknown roles are denied.
 
-Volcano is a pull model: Project asks Filter for a row; Filter keeps asking Scan until a predicate matches or the input ends. `None` signals exhaustion. `collect` closes the tree even if evaluation fails; reopening restarts the scan. The vector executor pulls a batch of columns, computes one Boolean mask for all rows, then projects columns. Empty filtered batches are skipped; the last batch may be partial.
+For the sample data, the lookup finds Mona, the injection-shaped input finds nobody,
+and a report with a minimum of 200 includes Ali's 250 order and Mona's 400 order. A
+viewer who tries to run that report gets a `PermissionError`.
 
-The join builds hash buckets from the left relation, then probes with each right key. It compares the key against an entire bucket using `keys == key`. Hash collisions are resolved by checking equality. Every matching index is returned, so duplicate keys preserve SQL inner-join multiplicity. Keys are one-dimensional, signed int64 values; NULL and string join semantics are outside this exercise.
+Try the lookup for Mona, then notice what happens when the input is the string
+`' OR 1=1 --`. The value is passed as data, so it does not change the meaning of the
+query and returns no customers. In the ORM expression `Customer.name == name`,
+SQLAlchemy binds `name` as a value. The report demonstrates the same idea with the
+bound parameter `:minimum`. Do not build SQL by inserting user values into a string.
 
-NumPy's native equality kernels can use SIMD CPU dispatch. The Python implementation vectorizes bucket comparison; hashing, probing and result construction still involve Python. SIMD use depends on the installed build and CPU. `np.show_runtime()` reports available capabilities, not proof that every equality call used a particular instruction.
+Parameter binding is for values, not table or column names. If a program needs to
+choose a column dynamically, it must select from an explicit allowlist. Also, the
+roles here are an application-level teaching example: this demo has no login system
+or PostgreSQL roles. A real application must get the user's role from trusted
+authentication and prevent untrusted code from bypassing `QueryService` through direct
+access to the session.
 
-The C++ implementation explicitly uses SSE2 intrinsics: broadcast the probe key, load four bucket keys, compare all four lanes, extract the match mask, and emit matching pairs. A scalar tail handles remaining keys without reading outside the array. It uses signed int32 keys and requires an x86-64 compiler/CPU with SSE2. Compile and run with an existing GCC/MinGW installation:
+When `add_order()` is called, the service checks the role and rejects negative
+amounts. It adds the order to the SQLAlchemy session and calls `flush()`; the caller
+still controls whether the transaction is committed or rolled back. The tests use a
+rollback to show that an inserted order can be undone before commit.
+
+## Part 2 — Follow a query through its operators
+
+In `executors.py`, the Volcano-style pipeline processes one row at a time:
+
+```text
+Scan rows → Filter matching rows → Project selected columns → Results
+```
+
+The caller asks `Project` for a row. It asks `Filter`, which keeps pulling from
+`Scan` until a row passes the condition or the input ends. `None` means there are no
+more rows. Each operator has `open()`, `next()`, and `close()` methods. The `collect()`
+helper opens the pipeline, gathers its rows, and closes it even if an error occurs.
+Calling it again reopens the scan.
+
+The vectorized pipeline follows the same idea but works on column arrays in batches:
+
+```text
+Column arrays → VectorScan batch → Boolean mask → VectorProject → Results
+```
+
+`VectorFilter` creates one Boolean value per row and applies that mask to every
+column in the batch. It skips batches with no matching rows. The final batch can be
+smaller than the requested batch size. `collect_batches()` converts the batches back
+to row dictionaries so the tests and benchmark can compare them with the row-at-a-time
+result.
+
+## Part 3 — Compare hash joins
+
+The scalar join builds a dictionary from each key on the left to its row positions,
+then probes that dictionary for every key on the right. The NumPy version groups left
+keys into hash buckets and compares each right key against the keys in its bucket.
+Hashing narrows the candidates; the equality check handles collisions. Every matching
+pair is returned, including duplicate-key combinations, as an inner join should.
+
+NumPy may use SIMD-capable CPU kernels for array comparisons, depending on the NumPy
+build and processor. The Python code still performs hashing, probing, and result
+construction in Python, so it is not guaranteed to be faster. `np.show_runtime()` can
+show available CPU capabilities, but it does not prove that a particular comparison
+used a particular instruction.
+
+The optional `simd_hash_join.cpp` version makes the SIMD step explicit with SSE2: it
+compares four signed 32-bit keys at a time, then checks any remaining keys one by one.
+It verifies its output against a simple nested-loop join on empty inputs, duplicates,
+negative keys, collisions, and random test data. Compiling it requires a separate
+x64 C++ toolchain; it is not installed by the Python requirements.
+
+With GCC or MinGW, compile and run it from the repository root:
 
 ```powershell
 g++ -O2 -std=c++17 -msse2 labs\lab05\simd_hash_join.cpp -o labs\lab05\simd_hash_join.exe
 .\labs\lab05\simd_hash_join.exe
 ```
 
-Or in a Visual Studio x64 Developer PowerShell:
+Or use a Visual Studio x64 Developer PowerShell:
 
 ```powershell
 cl /O2 /EHsc /std:c++17 labs\lab05\simd_hash_join.cpp /Fe:labs\lab05\simd_hash_join.exe
 .\labs\lab05\simd_hash_join.exe
 ```
 
-Its executable verifies results against a nested-loop join across empty inputs, duplicates, negative keys, forced collisions, scalar tails and 100 random datasets. Compilation requires a C++ toolchain separately from the Python environment.
+## Check your results
 
-## Verification and interpretation
+`test_lab05.py` compares the joins with an independent nested-loop result and checks
+edge cases such as empty inputs, duplicate keys, collisions, and negative keys. It
+also checks batch boundaries, reopening an operator, parameter binding, role checks,
+and transaction rollback. Run it with:
 
-`test_lab05.py` compares joins with an independent nested-loop oracle, including duplicates, negative keys, forced collisions and empty inputs. It checks batch boundaries, reopening, malformed input, injection attempts, denied roles and transaction rollback. These database tests run on SQLite; PostgreSQL compatibility requires the optional server run.
+```powershell
+python labs\lab05\test_lab05.py
+```
 
-`bench_executor.py` verifies equal results before printing timings. Conversion to row/column input happens before timing; output materialization is included. One local timing per implementation is illustrative, not a rigorous benchmark. The NumPy join can be slower than Python dictionary lookup because of per-probe array overhead. Record actual timings rather than claiming a guaranteed speedup.
+`bench_executor.py` first confirms that the row and vectorized pipelines return the
+same results, then prints local timings. It also compares the scalar and NumPy joins
+before showing timing results and NumPy's available runtime capabilities. Your timing
+will depend on the machine, Python, and NumPy build; one run is an observation, not a
+performance guarantee. In particular, vectorization can be slower on small inputs or
+when Python overhead dominates.
+
+## Questions to consider
+
+- Where is the user-provided customer name bound in the ORM lookup?
+- Why is `:minimum` safer than formatting the report SQL with a string?
+- Which operator requests each row in the Volcano pipeline, and what ends the scan?
+- How does a Boolean mask apply the same filter to every column in a batch?
+- Why does the hash join still compare actual keys after choosing a bucket?
+- What does the benchmark verify before it reports a time, and what does it not prove?
+
 
