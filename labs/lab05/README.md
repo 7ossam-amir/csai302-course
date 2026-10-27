@@ -160,4 +160,8 @@ when Python overhead dominates.
 - Why does the hash join still compare actual keys after choosing a bucket?
 - What does the benchmark verify before it reports a time, and what does it not prove?
 
+## Practice
+
+After the lab, complete the task in [`practice/`](practice/README.md): repeat the lab on a small school (students and their grades), using the tables `practice05_students` and `practice05_enrollments`, and add a `Limit` operator. Starter files and public checks are included.
+
 
