@@ -1,6 +1,6 @@
 # Lab 5 Practice
 
-An intermediate activity designed for about 60 minutes. Read [STUDENT_TASK.md](STUDENT_TASK.md) for the full instructions.
+Read [STUDENT_TASK.md](STUDENT_TASK.md) for the full instructions.
 
 Students repeat the parts of the lab on a different topic, a small school: an ORM model, bound queries and role checks for students and their grades, the Volcano operators plus a new `Limit`, the vectorized operators, and a bucketed hash join. The tables are `practice05_students` and `practice05_enrollments`, so the `lab05_*` data is not affected.
 
