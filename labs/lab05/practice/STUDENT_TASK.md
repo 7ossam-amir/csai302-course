@@ -1,7 +1,5 @@
 # Lab 5 Practice — A Small School
 
-Difficulty: intermediate. Suggested time: 60 minutes.
-
 Repeat the parts of the lab on a different topic. Instead of customers and orders, you build a small **school**: students and their course grades. The database tables are `practice05_students` and `practice05_enrollments`, so the `lab05_*` tables are not affected.
 
 Each part below names the lab file to copy the idea from. Read that file first.
