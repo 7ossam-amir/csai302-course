@@ -90,4 +90,3 @@ The starter functions raise `NotImplementedError` until completed.
     5. In your `compare.py` output, which join was faster, and why?
     6. (If you ran `--postgres` twice) The second run printed a different new enrollment id, although the first one was rolled back. Why?
 
-Do not modify the provided checks or the original lab files.
