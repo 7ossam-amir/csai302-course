@@ -1,6 +1,6 @@
 # Lab 7 - Transaction Processing and MVCC
 
-**Duration:** 2 hours in class, followed by an independent 4-7 hour home practice.
+
 
 Week 7 covers transaction processing and concurrency control. In this lab, students
 trace a small version-visibility model, observe concurrent behavior in PostgreSQL,
@@ -31,14 +31,7 @@ visibility rules. The syllabus's project milestone includes a transactional quer
 engine; this lab supplies a small concurrency-control foundation without taking on
 the full engine, multiple join algorithms, visualization, or TPC-H queries.
 
-The two-hour session is organized as follows:
 
-| Time | Activity |
-|---|---|
-| 0-20 min | Instructor discussion of ACID isolation, versions, anomalies, locks, deadlocks, and authorization |
-| 20-45 min | Guided Python and PostgreSQL examples using the reference simulator |
-| 45-110 min | Individual code-tracing and documentation assessment; no code writing |
-| 110-120 min | Debrief on invariants, edge cases, and control trade-offs |
 
 After class, students complete the independent implementation practice.
 
