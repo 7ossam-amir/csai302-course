@@ -274,16 +274,6 @@ atomic-update example uses a two-party barrier to start two independent clients 
 the same time; each worker has its own Psycopg connection. No connection object is
 shared between the worker threads.
 
-## In-class code-tracing assessment
-
-The 65-minute assessment is an individual code-reading and documentation task. It
-does not ask students to write or edit code. Students predict behavior before they
-verify it, trace the actual `mvcc.py` methods and the wait-for graph checker, and
-explain failure cases and design limits in their own words. The worksheet is worth
-100 points across architecture, manual tracing, code reasoning, edge cases, a graph
-trace, and engineering judgment. Generative AI and code assistants are not allowed
-during this supervised activity. Submit the completed file as
-`CSAI302_Lab07_CodeTrace_<StudentID>.docx`.
 
 ## Home implementation practice
 
@@ -305,9 +295,4 @@ invariants, write-skew reasoning, simplifications, and test evidence.
   blocked lock caused a problem?
 - Why does first-committer-wins prevent some lost updates but still allow write skew?
 
-The in-memory reference has no durability or real parallel execution. The home
-assignment adds write-conflict checks, but still uses snapshot isolation: two
-transactions can read the same invariant and write different keys, so both may
-commit and violate that invariant. PostgreSQL SERIALIZABLE adds further checks and
-may ask an application to retry. These examples teach selected behaviors; they are
-not substitutes for PostgreSQL's transaction manager.
+
