@@ -1,0 +1,45 @@
+# Lab 10: two independent MongoDB instances used as two shards.
+# Each one is a single-node replica set, because MongoDB multi-document transactions need a
+# replica set. They know nothing about each other: mongo_demo.py coordinates them with 2PC.
+name: csai302-lab10
+
+x-mongo: &mongo
+  image: mongo:7.0
+  restart: "no"
+
+services:
+  shard-a:
+    <<: *mongo
+    command: ["mongod", "--replSet", "rsA", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "27031:27017"
+    volumes:
+      - shard-a-data:/data/db
+    healthcheck:  # also initiates the one-member replica set on first start
+      test: ["CMD", "mongosh", "--quiet", "--eval",
+             "try { rs.status().ok } catch (e) { rs.initiate({_id: 'rsA', members: [{_id: 0, host: 'localhost:27017'}]}).ok }"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 5s
+
+  shard-b:
+    <<: *mongo
+    command: ["mongod", "--replSet", "rsB", "--bind_ip_all", "--port", "27017"]
+    ports:
+      - "27032:27017"
+    volumes:
+      - shard-b-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval",
+             "try { rs.status().ok } catch (e) { rs.initiate({_id: 'rsB', members: [{_id: 0, host: 'localhost:27017'}]}).ok }"]
+      interval: 5s
+      timeout: 10s
+      retries: 30
+      start_period: 5s
+
+volumes:
+  shard-a-data:
+    name: csai302-lab10-shard-a
+  shard-b-data:
+    name: csai302-lab10-shard-b
